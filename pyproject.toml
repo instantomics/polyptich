@@ -22,17 +22,22 @@ dependencies = [
     "matplotlib",
     "numpy",
     "pandas",
+    "PyJWT[crypto]",
+    "waitress",
 ]
 dynamic = ["version", "readme"]
 license = "MIT"
 
 [project.urls]
-"Homepage" = "https://github.com/zouter/polyptich"
-"Bug Tracker" = "https://github.com/zouter/polyptich/issues"
+"Homepage" = "https://github.com/instantomics/polyptich"
+"Bug Tracker" = "https://github.com/instantomics/polyptich/issues"
 
 [project.scripts]
 polyptich-www = "polyptich.www.server:main"
 polyptich-www-examples = "polyptich.www.examples:main"
+
+[project.entry-points."polyptich.www.endpoints"]
+"polyptich.overview-grid" = "polyptich.www.overview:OverviewGridEndpoint"
 
 [tool.setuptools.dynamic]
 readme = {file = "README.md", content-type = "text/markdown"}

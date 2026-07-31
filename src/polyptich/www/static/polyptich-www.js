@@ -108,48 +108,6 @@
     });
   }
 
-  function setHealth(indicator, state, label) {
-    if (!indicator) return;
-    indicator.classList.remove("health-ok", "health-restarting", "health-offline");
-    indicator.classList.add("health-" + state);
-    indicator.textContent = label;
-  }
-
-  function waitForHealth(indicator, button, healthUrl) {
-    fetch(healthUrl, { cache: "no-store" }).then((response) => {
-      if (!response.ok) throw new Error("Health check failed");
-      setHealth(indicator, "ok", "Server online");
-      if (button) {
-        button.disabled = false;
-        button.textContent = "Restart server";
-      }
-    }).catch(() => {
-      setHealth(indicator, "offline", "Waiting for server");
-      window.setTimeout(() => waitForHealth(indicator, button, healthUrl), 750);
-    });
-  }
-
-  function initialiseRestartControls() {
-    const form = document.querySelector("[data-restart-form]");
-    const indicator = document.querySelector("[data-health-indicator]");
-    if (!form || !indicator) return;
-    const button = form.querySelector("button");
-    const healthUrl = indicator.dataset.healthUrl || "/health";
-
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      if (button) {
-        button.disabled = true;
-        button.textContent = "Restarting...";
-      }
-      setHealth(indicator, "restarting", "Restarting server");
-      fetch(form.action, { method: "POST", cache: "no-store" }).finally(() => {
-        window.setTimeout(() => waitForHealth(indicator, button, healthUrl), 500);
-      });
-    });
-  }
-
-  initialiseRestartControls();
   initialiseTabs();
   initialiseDownloads();
   queueRender(document);

@@ -7,13 +7,25 @@ from flask import jsonify, redirect, request
 
 
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
+OVERVIEW_ENDPOINT_ID = "polyptich.overview-grid"
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
 class OverviewGrid:
-    def __init__(self, path, title=None, description=None, filters=None, sorts=None, page_size=24, overwrite=True):
+    def __init__(
+        self,
+        path,
+        title=None,
+        description=None,
+        filters=None,
+        sorts=None,
+        page_size=24,
+        overwrite=True,
+        required_scope=None,
+    ):
         self.path = Path(path)
         self.manifest_path = self.path / "manifest.json"
         self.items_path = self.path / "items.json"
@@ -26,7 +38,7 @@ class OverviewGrid:
         self.manifest = {
             "schema": ENDPOINT_SCHEMA,
             "schema_version": 1,
-            "handler": "polyptich.www.overview:OverviewGridEndpoint",
+            "endpoint_id": OVERVIEW_ENDPOINT_ID,
             "title": title or self.path.name,
             "description": description,
             "created_at": _now(),
@@ -36,6 +48,8 @@ class OverviewGrid:
             "sorts": sorts or [],
             "page_size": page_size,
         }
+        if required_scope is not None:
+            self.manifest["required_scope"] = required_scope
         self.write()
 
     def add_item(self, title, href, description=None, media=None, badges=None, values=None, **extra):

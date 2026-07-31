@@ -24,7 +24,7 @@ fig.display()
 
 
     
-![png](https://github.com/zouter/polyptich/blob/master/README_files/README_2_0.png?raw=True)
+![png](https://github.com/instantomics/polyptich/blob/master/README_files/README_2_0.png?raw=True)
     
 
 
@@ -57,7 +57,7 @@ fig.display()
 
 
     
-![png](https://github.com/zouter/polyptich/blob/master/README_files/README_3_0.png?raw=True)
+![png](https://github.com/instantomics/polyptich/blob/master/README_files/README_3_0.png?raw=True)
     
 
 
@@ -88,7 +88,7 @@ fig.display()
 
 
     
-![png](https://github.com/zouter/polyptich/blob/master/README_files/README_4_0.png?raw=True)
+![png](https://github.com/instantomics/polyptich/blob/master/README_files/README_4_0.png?raw=True)
     
 
 
@@ -133,7 +133,7 @@ fig.display()
 
 
     
-![png](https://github.com/zouter/polyptich/blob/master/README_files/README_6_0.png?raw=True)
+![png](https://github.com/instantomics/polyptich/blob/master/README_files/README_6_0.png?raw=True)
     
 
 
@@ -155,6 +155,5 @@ fig.display()
 
 
     
-![png](https://github.com/zouter/polyptich/blob/master/README_files/README_7_0.png?raw=True)
+![png](https://github.com/instantomics/polyptich/blob/master/README_files/README_7_0.png?raw=True)
     
-

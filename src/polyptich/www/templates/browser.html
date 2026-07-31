@@ -14,12 +14,6 @@
         <p class="subtitle">Serving files from <code>{{ base_dir }}</code></p>
       </div>
       <div class="server-tools">
-        <span class="health health-ok" data-health-indicator data-health-url="{{ url_for('health') }}">Server online</span>
-        {% if allow_restart %}
-          <form class="restart-form" method="post" action="{{ url_for('restart') }}" data-restart-form>
-            <button type="submit">Restart server</button>
-          </form>
-        {% endif %}
         <span class="summary">{{ item_count }} item{% if item_count != 1 %}s{% endif %}</span>
       </div>
     </div>
@@ -52,9 +46,6 @@
                 {% if item.browse_href %}
                   <a class="inline-action" href="{{ item.browse_href }}" onclick="event.stopPropagation()">Browse files</a>
                 {% endif %}
-                <form class="inline-delete" method="post" action="{{ item.delete_href }}" onclick="event.stopPropagation()" onsubmit="return confirm('Delete ' + {{ item.display_name|tojson }} + '? This cannot be undone.');">
-                  <button type="submit">Delete</button>
-                </form>
               </td>
               <td class="right mobile-label" data-label="Size">{{ item.size }}</td>
               <td class="right mobile-label muted" data-label="Modified">{{ item.modified }}</td>

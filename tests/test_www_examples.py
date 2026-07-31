@@ -28,5 +28,5 @@ def test_write_examples_creates_static_and_dynamic_examples(tmp_path):
     assert (root / "component_library" / "index.html").exists()
     assert component_manifest["schema"] == "polyptich.www.report"
     assert overview_manifest["schema"] == "polyptich.www.endpoint"
-    assert overview_manifest["handler"] == "polyptich.www.overview:OverviewGridEndpoint"
+    assert overview_manifest["endpoint_id"] == "polyptich.overview-grid"
     assert len(overview_items) == 36

@@ -121,7 +121,15 @@ class Tabs:
 
 
 class Page(ComponentContainer):
-    def __init__(self, path, title=None, description=None, author=None, overwrite=True):
+    def __init__(
+        self,
+        path,
+        title=None,
+        description=None,
+        author=None,
+        overwrite=True,
+        required_scope=None,
+    ):
         self.path = Path(path)
         self.assets_path = self.path
         self.manifest_path = self.path / "manifest.json"
@@ -147,6 +155,8 @@ class Page(ComponentContainer):
                 "updated_at": _now(),
                 "assets": {},
             }
+            if required_scope is not None:
+                self.manifest["required_scope"] = required_scope
             self.components = []
 
         if not hasattr(self, "components"):
@@ -261,7 +271,7 @@ class Page(ComponentContainer):
 <body>
   <div class="report-shell">
     <aside class="toc">
-      <a class="back-link" href="/browse/">www</a>
+      <a class="back-link" href="/">www</a>
       <nav id="toc">{toc}</nav>
     </aside>
     <main class="report">
