@@ -10,11 +10,22 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, abort, g, jsonify, redirect, render_template, request
-from flask import send_file, send_from_directory, url_for
+from flask import (
+    Flask,
+    abort,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    url_for,
+)
 
 from .auth import (
     REPORTS_READ,
+    SERVICE_RESTART,
     AccessConfig,
     AccessVerificationError,
     CloudflareAccessVerifier,
@@ -23,7 +34,6 @@ from .auth import (
     scopes_for_email,
 )
 from .page import SCHEMA
-
 
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
@@ -72,6 +82,7 @@ def create_app(
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
         POLYPTICH_WWW_ENDPOINT_PARENTS={},
         POLYPTICH_WWW_ENDPOINT_SCOPES={},
+        POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
     )
 
     def safe_path(subpath=""):
@@ -203,6 +214,11 @@ def create_app(
             base_dir=base_dir,
             item_count=len(items),
             query=query,
+            service_restart_control=(
+                app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"]
+                if has_scope(SERVICE_RESTART)
+                else None
+            ),
         )
 
     @app.route("/files/")
@@ -316,6 +332,23 @@ def create_app(
     factories = _discover_endpoint_factories(endpoint_factories)
     _register_endpoint_manifests(app, base_dir, manifests, factories)
     return app
+
+
+def register_service_restart_control(app, *, session_url, restart_url):
+    control = {
+        "session_url": _local_url(session_url, "session_url"),
+        "restart_url": _local_url(restart_url, "restart_url"),
+    }
+    existing = app.config.get("POLYPTICH_WWW_SERVICE_RESTART_CONTROL")
+    if existing is not None and existing != control:
+        raise ValueError("A Polyptich service restart control is already registered")
+    app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"] = control
+
+
+def _local_url(value, name):
+    if not isinstance(value, str) or not value.startswith("/") or value.startswith("//"):
+        raise ValueError(f"Polyptich service restart {name} must be a local absolute URL")
+    return value
 
 
 def _read_initial_manifests(base_dir):

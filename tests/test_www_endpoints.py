@@ -10,10 +10,11 @@ from polyptich.www import (
     AccessIdentity,
     current_identity,
     current_scopes,
+    register_service_restart_control,
     require_scope,
+    server,
 )
 from polyptich.www.auth import AccessVerificationError
-from polyptich.www import server
 
 
 class FakeVerifier:
@@ -119,6 +120,29 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     download = client.get("/report-download/private/report/table.xlsx", headers=viewer)
     assert download.status_code == 200
     assert download.data == b"xlsx-data"
+
+
+def test_browser_exposes_registered_restart_control_only_to_operators(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        operator_emails=["operator@example.test"],
+    )
+    register_service_restart_control(
+        app,
+        session_url="/endpoint/agent/api/v1/session",
+        restart_url="/endpoint/agent/api/v1/service/restart",
+    )
+    client = app.test_client()
+
+    viewer = client.get("/", headers=auth("viewer@example.test")).get_data(as_text=True)
+    operator = client.get("/", headers=auth("operator@example.test")).get_data(as_text=True)
+
+    assert "data-service-restart" not in viewer
+    assert "data-service-restart" in operator
+    assert 'data-session-url="/endpoint/agent/api/v1/session"' in operator
+    assert 'data-restart-url="/endpoint/agent/api/v1/service/restart"' in operator
 
 
 def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path):
