@@ -1,19 +1,8 @@
-import importlib.util
 import json
-from pathlib import Path
 
 import pytest
 
-
-def load_page_class():
-    path = Path(__file__).parents[1] / "src" / "polyptich" / "www" / "page.py"
-    spec = importlib.util.spec_from_file_location("polyptich_www_page", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.Page
-
-
-Page = load_page_class()
+from polyptich.www.page import Page
 
 
 def read_manifest(path):
@@ -34,6 +23,10 @@ def test_page_writes_manifest_immediately(tmp_path):
     html = (report / "index.html").read_text()
     assert 'id="qc"' in html
     assert "<strong>ok</strong>" in html
+    assert html.count("data-polyptich-navigation-shell") == 1
+    assert "/static/polyptich-navigation.css" in html
+    assert "/static/polyptich-navigation.js" in html
+    assert '<aside class="toc">' not in html
 
 
 def test_overwrite_deletes_existing_folder(tmp_path):
@@ -72,7 +65,9 @@ def test_tabs_preserve_insertion_order(tmp_path):
 
 def test_cards_can_contain_arbitrary_html_and_links(tmp_path):
     page = Page(tmp_path / "www" / "report")
-    page.add_card('<img src="preview.png" alt="Preview"><p>open me</p>', title="Preview", href="../other/")
+    page.add_card(
+        '<img src="preview.png" alt="Preview"><p>open me</p>', title="Preview", href="../other/"
+    )
 
     html = (tmp_path / "www" / "report" / "index.html").read_text()
     assert '<a class="component card linked-card"' in html

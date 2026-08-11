@@ -14,6 +14,7 @@ from .auth import (
     has_scope,
     require_scope,
 )
+from .document import render_workspace_document, render_workspace_page
 from .examples import write_component_library, write_examples, write_overview_grid
 from .overview import OverviewGrid
 from .page import Page
@@ -38,6 +39,8 @@ __all__ = [
     "has_scope",
     "main",
     "register_service_restart_control",
+    "render_workspace_document",
+    "render_workspace_page",
     "require_scope",
     "write_component_library",
     "write_examples",

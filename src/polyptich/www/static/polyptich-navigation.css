@@ -1,0 +1,258 @@
+#pt-global-navigation-shell,
+#pt-global-navigation-shell * {
+  box-sizing: border-box;
+}
+
+#pt-global-navigation-shell {
+  --pt-nav-width: 18rem;
+  --pt-nav-border: #d9dee8;
+  --pt-nav-muted: #667085;
+  --pt-nav-text: #182230;
+  --pt-nav-link: #234ea5;
+  --pt-nav-surface: #fff;
+  color: var(--pt-nav-text);
+  font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.pt-global-navigation__skip {
+  position: fixed;
+  z-index: 2147483647;
+  top: 0.5rem;
+  left: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: #173f90;
+  font: 700 14px/1.2 ui-sans-serif, system-ui, sans-serif;
+  transform: translateY(-180%);
+}
+
+.pt-global-navigation__skip:focus {
+  transform: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__sidebar {
+  position: fixed;
+  z-index: 2147483000;
+  inset: 0 auto 0 0;
+  width: var(--pt-nav-width);
+  overflow: auto;
+  padding: 1rem 0.8rem;
+  border-right: 1px solid var(--pt-nav-border);
+  background: var(--pt-nav-surface);
+  box-shadow: 1px 0 4px rgb(16 24 40 / 8%);
+}
+
+#pt-global-navigation-shell .pt-global-navigation__heading {
+  margin: 0 0.25rem 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toggle,
+#pt-global-navigation-shell .pt-global-navigation__overlay {
+  display: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__nav ul,
+#pt-global-navigation-shell .pt-global-navigation__toc ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__nav ul ul {
+  margin-left: 0.65rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid #e7eaf0;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin: 0.12rem 0;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__disclosure {
+  flex: 0 0 1.65rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--pt-nav-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__disclosure::before {
+  content: "›";
+  display: inline-block;
+  font-size: 1.2rem;
+  transition: transform 120ms ease;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__disclosure[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+#pt-global-navigation-shell .pt-global-navigation__spacer {
+  flex: 0 0 1.65rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__link,
+#pt-global-navigation-shell .pt-global-navigation__label,
+#pt-global-navigation-shell .pt-global-navigation__toc a {
+  min-width: 0;
+  padding: 0.32rem 0.4rem;
+  border-radius: 0.35rem;
+  color: var(--pt-nav-text);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__link:hover,
+#pt-global-navigation-shell .pt-global-navigation__toc a:hover {
+  background: #eef4ff;
+  color: var(--pt-nav-link);
+}
+
+#pt-global-navigation-shell .pt-global-navigation__link[aria-current="page"] {
+  background: #e5edff;
+  color: #173f90;
+  font-weight: 750;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__label {
+  font-weight: 700;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__favorite .pt-global-navigation__link::after {
+  content: "★";
+  margin-left: 0.35rem;
+  color: #b7791f;
+  font-size: 0.72rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__collection {
+  padding: 0.35rem 0 0.55rem 1.65rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__collection-label,
+#pt-global-navigation-shell .pt-global-navigation__collection-title {
+  display: block;
+  margin: 0.35rem 0 0.2rem;
+  color: var(--pt-nav-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__collection input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid #cfd5df;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: var(--pt-nav-text);
+  font: inherit;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__load-more {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid #cfd5df;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: var(--pt-nav-link);
+  cursor: pointer;
+  font: inherit;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__status {
+  margin: 0.4rem;
+  color: var(--pt-nav-muted);
+  font-size: 0.84rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--pt-nav-border);
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-title {
+  margin: 0 0.4rem 0.35rem;
+  color: var(--pt-nav-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc a {
+  display: block;
+  padding-block: 0.22rem;
+  font-size: 0.83rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-level-3 a {
+  padding-left: 1rem;
+}
+
+body[data-polyptich-navigation-host] {
+  margin-left: 18rem !important;
+}
+
+@media (max-width: 64rem) {
+  body[data-polyptich-navigation-host] {
+    margin-left: 0 !important;
+  }
+
+  #pt-global-navigation-shell .pt-global-navigation__toggle {
+    display: block;
+    position: fixed;
+    z-index: 2147483100;
+    top: 0.65rem;
+    left: 0.65rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid #cfd5df;
+    border-radius: 0.45rem;
+    background: #fff;
+    color: #182230;
+    box-shadow: 0 2px 8px rgb(16 24 40 / 14%);
+    cursor: pointer;
+    font: 700 14px/1.2 ui-sans-serif, system-ui, sans-serif;
+  }
+
+  #pt-global-navigation-shell .pt-global-navigation__sidebar {
+    transform: translateX(-105%);
+    transition: transform 160ms ease;
+  }
+
+  #pt-global-navigation-shell.pt-global-navigation--open .pt-global-navigation__sidebar {
+    transform: none;
+  }
+
+  #pt-global-navigation-shell.pt-global-navigation--open .pt-global-navigation__overlay {
+    display: block;
+    position: fixed;
+    z-index: 2147482900;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgb(15 23 42 / 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pt-global-navigation-shell .pt-global-navigation__sidebar,
+  #pt-global-navigation-shell .pt-global-navigation__disclosure::before {
+    transition: none;
+  }
+}

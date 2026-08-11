@@ -1,14 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>polyptich www: /{{ subpath }}</title>
-  <link rel="stylesheet" href="{{ url_for('static_files', filename='polyptich-www.css') }}">
-</head>
-<body>
-  <main class="browser">
-    <div class="topbar">
+<div class="topbar">
       <div>
         <h1>polyptich www: /{{ subpath }}</h1>
         <p class="subtitle">Serving files from <code>{{ base_dir }}</code></p>
@@ -25,7 +15,7 @@
         {% endif %}
         <span class="summary">{{ item_count }} item{% if item_count != 1 %}s{% endif %}</span>
       </div>
-    </div>
+  </div>
 
     <ol class="breadcrumbs">
       {% for crumb in breadcrumbs %}
@@ -48,12 +38,12 @@
         <thead><tr><th>Name</th><th>Kind</th><th>Actions</th><th class="right">Size</th><th class="right">Modified</th></tr></thead>
         <tbody>
           {% for item in items %}
-            <tr class="row-link" onclick="window.location.href='{{ item.href }}'">
-              <td><span class="icon icon-{{ item.icon }}"></span>{{ item.display_name }}</td>
+            <tr>
+              <td><span class="icon icon-{{ item.icon }}"></span><a href="{{ item.href }}">{{ item.display_name }}</a></td>
               <td>{{ item.kind }}</td>
               <td>
                 {% if item.browse_href %}
-                  <a class="inline-action" href="{{ item.browse_href }}" onclick="event.stopPropagation()">Browse files</a>
+                  <a class="inline-action" href="{{ item.browse_href }}">Browse files</a>
                 {% endif %}
               </td>
               <td class="right mobile-label" data-label="Size">{{ item.size }}</td>
@@ -65,7 +55,3 @@
     {% else %}
       <div class="empty">{% if query %}No items match <code>{{ query }}</code>.{% else %}This directory is empty.{% endif %}</div>
     {% endif %}
-  </main>
-  <script src="{{ url_for('static_files', filename='polyptich-www.js') }}"></script>
-</body>
-</html>

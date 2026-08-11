@@ -8,13 +8,16 @@ from flask import jsonify
 from polyptich.www import (
     AccessConfig,
     AccessIdentity,
+    OverviewGrid,
     current_identity,
     current_scopes,
     register_service_restart_control,
+    render_workspace_document,
     require_scope,
     server,
 )
 from polyptich.www.auth import AccessVerificationError
+from polyptich.www.overview import OverviewGridEndpoint
 
 
 class FakeVerifier:
@@ -60,7 +63,9 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
             },
         },
     )
-    (report / "index.html").write_text("<html><head></head><body>private report</body></html>")
+    (report / "index.html").write_text(
+        render_workspace_document("Private report", "private report")
+    )
     (report / "plot.json").write_text('{"data": []}')
     (report / "table.parquet").write_bytes(b"table")
     write_manifest(
@@ -68,9 +73,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
         {
             "schema": "polyptich.www.report",
             "schema_version": 1,
-            "assets": {
-                "plot": {"type": "plotly", "asset": "../private/report/plot.json"}
-            },
+            "assets": {"plot": {"type": "plotly", "asset": "../private/report/plot.json"}},
         },
     )
     (www / "unsafe-report" / "index.html").write_text("<html><head></head></html>")
@@ -113,9 +116,11 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
         assert client.get(path, headers=regular).status_code == 403
 
     viewer = auth("viewer@example.test")
-    rendered = client.get("/report/private/report", headers=viewer)
+    rendered = client.get("/report/private/report/", headers=viewer)
     assert rendered.status_code == 200
-    assert b'<base href="/files/private/report/">' in rendered.data
+    assert rendered.data.count(b"data-polyptich-navigation-shell") == 1
+    assert b"<base " not in rendered.data
+    assert client.get("/report/private/report/plot.json", headers=viewer).data == b'{"data": []}'
     assert client.get("/report-data/private/report/plot", headers=viewer).data == b'{"data": []}'
     download = client.get("/report-download/private/report/table.xlsx", headers=viewer)
     assert download.status_code == 200
@@ -145,7 +150,115 @@ def test_browser_exposes_registered_restart_control_only_to_operators(tmp_path):
     assert 'data-restart-url="/endpoint/agent/api/v1/service/restart"' in operator
 
 
-def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path):
+def test_overview_endpoint_uses_workspace_document(tmp_path):
+    OverviewGrid(tmp_path / "www" / "overview", title="Datasets", navigation_id="datasets")
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        endpoint_factories={"polyptich.overview-grid": OverviewGridEndpoint},
+    )
+
+    response = app.test_client().get("/endpoint/overview/", headers=auth("reader@example.test"))
+
+    assert response.status_code == 200
+    assert response.data.count(b"data-polyptich-navigation-shell") == 1
+    assert b"polyptich-navigation.css" in response.data
+    assert b"polyptich-overview.js" in response.data
+    assert b'"navigation_id":"datasets"' in response.data
+
+
+def test_endpoint_contributions_require_destination_and_collection_source_scope(tmp_path):
+    www = tmp_path / "www"
+    www.mkdir()
+    (www / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [{"id": "agent", "label": "Agent", "type": "section"}],
+            }
+        )
+    )
+    write_manifest(
+        www / "public",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.scoped-navigation",
+            "navigation": {
+                "parent_id": "agent",
+                "items": [
+                    {
+                        "id": "private-page",
+                        "label": "Secret page",
+                        "type": "page",
+                        "href": "private/",
+                    },
+                    {
+                        "id": "private-collection",
+                        "label": "Secret collection",
+                        "type": "collection",
+                        "href": ".",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "private/api/v1/navigation/items",
+                            "placeholder": "Find a secret",
+                        },
+                    },
+                ],
+            },
+        },
+    )
+    write_manifest(
+        www / "public" / "private",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.scoped-navigation",
+            "required_scope": "private.read",
+        },
+    )
+
+    class Endpoint:
+        def __init__(self, path, mount_path, manifest):
+            pass
+
+        def register(self, app, mount_url, endpoint_name):
+            app.add_url_rule(mount_url + "/", endpoint_name, lambda: "endpoint")
+
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        trusted_viewer_emails=["viewer@example.test"],
+        endpoint_factories={"tests.scoped-navigation": Endpoint},
+    )
+    client = app.test_client()
+
+    regular = client.get("/api/v1/navigation", headers=auth("reader@example.test"))
+    assert regular.get_json()["items"] == []
+    assert b"Secret page" not in regular.data
+    assert b"Secret collection" not in regular.data
+
+    trusted = client.get("/api/v1/navigation", headers=auth("viewer@example.test")).get_json()
+    assert [item["id"] for item in trusted["items"][0]["children"]] == [
+        "private-page",
+        "private-collection",
+    ]
+
+
+def test_trusted_endpoint_factory_gets_context_scope_helpers_and_global_navigation(tmp_path):
+    (tmp_path / "www").mkdir()
+    (tmp_path / "www" / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [{"id": "agent", "label": "Agent", "type": "section"}],
+            }
+        )
+    )
     write_manifest(
         tmp_path / "www" / "private",
         {"schema": "polyptich.www.folder", "schema_version": 1, "required_scope": "private.read"},
@@ -158,6 +271,22 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
             "schema_version": 1,
             "endpoint_id": "tests.agent",
             "title": "Agent",
+            "navigation": {
+                "parent_id": "agent",
+                "items": [
+                    {
+                        "id": "agent-runs",
+                        "label": "Agent runs",
+                        "type": "collection",
+                        "href": ".",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "api/v1/navigation/agent-runs",
+                            "placeholder": "Find an agent run",
+                        },
+                    }
+                ],
+            },
         },
     )
     observed = {}
@@ -210,8 +339,22 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
     viewer = client.get("/endpoint/private/agent/", headers=auth("viewer@example.test"))
     assert viewer.status_code == 200
     assert b"private.read" in viewer.data
-    assert b"data-endpoint-browser-banner" in viewer.data
-    assert b'href="/browse/private"' in viewer.data
+    assert b"data-polyptich-navigation-shell" not in viewer.data
+    assert b"data-endpoint-browser-banner" not in viewer.data
+    regular_navigation = client.get(
+        "/api/v1/navigation", headers=auth("reader@example.test")
+    ).get_json()
+    assert regular_navigation["items"] == []
+    viewer_navigation = client.get(
+        "/api/v1/navigation", headers=auth("viewer@example.test")
+    ).get_json()
+    contributed = viewer_navigation["items"][0]["children"][0]
+    assert contributed["href"] == "/endpoint/private/agent/"
+    assert contributed["collection"] == {
+        "type": "endpoint",
+        "href": "/endpoint/private/agent/api/v1/navigation/agent-runs",
+        "placeholder": "Find an agent run",
+    }
     assert (
         client.get(
             "/endpoint/private/agent/control", headers=auth("viewer@example.test")
