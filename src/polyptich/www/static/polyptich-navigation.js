@@ -226,6 +226,8 @@
     let controller = null;
     let debounce = null;
     let ready = false;
+    let total = 0;
+    const pageSize = 20;
 
     const status = document.createElement("p");
     status.className = "pt-global-navigation__status";
@@ -245,14 +247,25 @@
     input.type = "search";
     input.placeholder = config.placeholder || "Search";
     const results = document.createElement("ul");
-    const more = document.createElement("button");
-    more.className = "pt-global-navigation__load-more";
-    more.type = "button";
-    more.textContent = "Load more";
-    more.hidden = true;
-    host.replaceChildren(favoriteTitle, favorites, label, input, results, more, status);
+    const toolbar = document.createElement("div");
+    toolbar.className = "pt-global-navigation__collection-toolbar";
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.textContent = "Previous";
+    const pageStatus = document.createElement("span");
+    pageStatus.className = "pt-global-navigation__page-status";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "pt-global-navigation__refresh";
+    refresh.textContent = "Refresh";
+    toolbar.append(previous, pageStatus, next, refresh);
+    toolbar.hidden = true;
+    host.replaceChildren(favoriteTitle, favorites, label, input, results, toolbar, status);
 
-    const requestPage = async (requestedPage, append) => {
+    const requestPage = async (requestedPage) => {
       if (controller) controller.abort();
       const activeController = new AbortController();
       controller = activeController;
@@ -260,9 +273,11 @@
       const url = new URL(config.href, window.location.href);
       url.searchParams.set("q", query);
       url.searchParams.set("page", String(requestedPage));
-      url.searchParams.set("page_size", "20");
+      url.searchParams.set("page_size", String(pageSize));
       status.textContent = "Loading…";
-      more.disabled = true;
+      previous.disabled = true;
+      next.disabled = true;
+      refresh.disabled = true;
       try {
         const response = await fetch(url, {headers: {Accept: "application/json"}, signal: activeController.signal});
         if (!response.ok) throw new Error(`Navigation request failed (${response.status})`);
@@ -273,17 +288,23 @@
         if (controller !== activeController) return;
         favorites.replaceChildren(...renderNodes(payload.favorites, 1).children);
         favoriteTitle.hidden = payload.favorites.length === 0;
-        const itemElements = [...renderNodes(payload.items, 1).children];
-        if (append) results.append(...itemElements);
-        else results.replaceChildren(...itemElements);
-        page = requestedPage;
-        more.hidden = !payload.has_more;
-        more.disabled = false;
-        status.textContent = payload.items.length || append ? "" : "No matching pages";
+        results.replaceChildren(...renderNodes(payload.items, 1).children);
+        page = payload.page;
+        total = payload.total;
+        const pages = Math.max(1, Math.ceil(total / payload.page_size));
+        toolbar.hidden = false;
+        previous.disabled = page <= 1;
+        next.disabled = !payload.has_more;
+        refresh.disabled = false;
+        pageStatus.textContent = `Page ${page} of ${pages}`;
+        status.textContent = payload.items.length ? `${total} item${total === 1 ? "" : "s"}` : "No matching pages";
         ready = true;
       } catch (error) {
         if (controller === activeController && error.name !== "AbortError") {
           status.textContent = "Navigation is temporarily unavailable";
+          previous.disabled = page <= 1;
+          next.disabled = page * pageSize >= total;
+          refresh.disabled = false;
         }
       } finally {
         if (controller === activeController) controller = null;
@@ -291,7 +312,7 @@
     };
 
     const ensureLoaded = () => {
-      if (!ready && !controller) requestPage(1, false);
+      if (!ready && !controller) requestPage(1);
     };
     host._ptEnsureCollectionLoaded = ensureLoaded;
 
@@ -299,10 +320,12 @@
       window.clearTimeout(debounce);
       debounce = window.setTimeout(() => {
         query = input.value.trim();
-        requestPage(1, false);
+        requestPage(1);
       }, 250);
     });
-    more.addEventListener("click", () => requestPage(page + 1, true));
+    previous.addEventListener("click", () => requestPage(Math.max(1, page - 1)));
+    next.addEventListener("click", () => requestPage(page + 1));
+    refresh.addEventListener("click", () => requestPage(page));
     ensureLoaded();
   };
 
