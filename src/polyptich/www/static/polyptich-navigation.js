@@ -43,6 +43,10 @@
   const navigationStateKey = "polyptichNavigation";
   const loadedScripts = new Set();
   const navigationScriptUrl = document.currentScript?.src || "";
+  const navigationIcons = new Set([
+    "agent", "tasks", "sources", "task", "overview", "evidence", "metrics", "examples",
+    "releases", "release", "folder", "document",
+  ]);
 
   const isNavigationAsset = (url) => /\/static\/polyptich-navigation\.(?:js|css)(?:[?#]|$)/.test(url);
   const isCurrentNavigationAsset = (url) => {
@@ -153,23 +157,63 @@
     }
   });
 
-  const makePageItem = (item) => {
-    const li = document.createElement("li");
-    if (item.favorite) li.className = "pt-global-navigation__favorite";
-    const row = document.createElement("div");
-    row.className = "pt-global-navigation__row";
-    const spacer = document.createElement("span");
-    spacer.className = "pt-global-navigation__spacer";
-    row.append(spacer);
-    const anchor = document.createElement("a");
-    anchor.className = "pt-global-navigation__link";
-    anchor.href = item.href;
-    anchor.textContent = item.label;
-    anchor.dataset.navigationId = item.id;
-    markActive(anchor, item);
-    row.append(anchor);
-    li.append(row);
-    return li;
+  const isLocalUrl = (value) => {
+    if (typeof value !== "string" || !value || value.length > 2048 || value.includes("\\")) return false;
+    try {
+      return new URL(value, window.location.href).origin === window.location.origin;
+    } catch (_error) {
+      return false;
+    }
+  };
+
+  const validateCollectionConfig = (value) => value
+    && typeof value === "object"
+    && Object.keys(value).every((key) => ["type", "href", "placeholder"].includes(key))
+    && ["directory", "endpoint"].includes(value.type)
+    && isLocalUrl(value.href)
+    && typeof value.placeholder === "string"
+    && value.placeholder.length > 0
+    && value.placeholder.length <= 200;
+
+  const validateNavigationNode = (item, depth = 0) => {
+    if (!item || typeof item !== "object" || depth > 32) return false;
+    if (!Object.keys(item).every((key) => [
+      "id", "label", "type", "href", "children", "favorite", "collection", "icon",
+    ].includes(key))) return false;
+    if (typeof item.id !== "string" || !/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(item.id)) return false;
+    if (typeof item.label !== "string" || !item.label.trim() || item.label.length > 200) return false;
+    if (!["section", "page", "collection"].includes(item.type)) return false;
+    if ("icon" in item && !navigationIcons.has(item.icon)) return false;
+    if ("favorite" in item && typeof item.favorite !== "boolean") return false;
+    if ("href" in item && !isLocalUrl(item.href)) return false;
+    if (item.type === "page" && !isLocalUrl(item.href)) return false;
+    if ((item.type === "collection") !== ("collection" in item)) return false;
+    if ("collection" in item && !validateCollectionConfig(item.collection)) return false;
+    if ("children" in item && (!Array.isArray(item.children)
+      || !item.children.every((child) => validateNavigationNode(child, depth + 1)))) return false;
+    return true;
+  };
+
+  const validateCollectionPayload = (payload) => {
+    if (!payload || payload.schema !== "polyptich.www.navigation.collection" || payload.schema_version !== 1) return false;
+    if (!Object.keys(payload).every((key) => [
+      "schema", "schema_version", "items", "favorites", "page", "page_size", "has_more", "total",
+    ].includes(key))) return false;
+    if (!Array.isArray(payload.items) || !payload.items.every((item) => validateNavigationNode(item))) return false;
+    if (!Array.isArray(payload.favorites) || !payload.favorites.every((item) => validateNavigationNode(item))) return false;
+    return Number.isInteger(payload.page) && payload.page > 0
+      && Number.isInteger(payload.page_size) && payload.page_size > 0
+      && Number.isInteger(payload.total) && payload.total >= 0
+      && typeof payload.has_more === "boolean";
+  };
+
+  const makeIcon = (icon) => {
+    if (!navigationIcons.has(icon)) return null;
+    const element = document.createElement("span");
+    element.className = "pt-global-navigation__icon";
+    element.dataset.icon = icon;
+    element.setAttribute("aria-hidden", "true");
+    return element;
   };
 
   const renderCollection = (host, config) => {
@@ -223,13 +267,13 @@
         const response = await fetch(url, {headers: {Accept: "application/json"}, signal: activeController.signal});
         if (!response.ok) throw new Error(`Navigation request failed (${response.status})`);
         const payload = await response.json();
-        if (!payload || !Array.isArray(payload.items) || !Array.isArray(payload.favorites)) {
+        if (!validateCollectionPayload(payload)) {
           throw new Error("Navigation collection returned an invalid response");
         }
         if (controller !== activeController) return;
-        favorites.replaceChildren(...payload.favorites.map(makePageItem));
+        favorites.replaceChildren(...renderNodes(payload.favorites, 1).children);
         favoriteTitle.hidden = payload.favorites.length === 0;
-        const itemElements = payload.items.map(makePageItem);
+        const itemElements = [...renderNodes(payload.items, 1).children];
         if (append) results.append(...itemElements);
         else results.replaceChildren(...itemElements);
         page = requestedPage;
@@ -262,8 +306,9 @@
     ensureLoaded();
   };
 
-  const renderNodes = (items) => {
+  const renderNodes = (items, depth = 0) => {
     const ul = document.createElement("ul");
+    ul.className = `pt-global-navigation__level pt-global-navigation__level--${Math.min(depth, 6)}`;
     const ordered = [...items].sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)));
     ordered.forEach((item) => {
       const li = document.createElement("li");
@@ -290,6 +335,8 @@
         spacer.className = "pt-global-navigation__spacer";
         row.append(spacer);
       }
+      const icon = makeIcon(item.icon);
+      if (icon) row.append(icon);
       let destination = null;
       if (item.href) {
         destination = document.createElement("a");
@@ -307,7 +354,9 @@
       li.append(row);
       if (panel) {
         let collection = null;
-        if (Array.isArray(item.children) && item.children.length) panel.append(renderNodes(item.children));
+        if (Array.isArray(item.children) && item.children.length) {
+          panel.append(renderNodes(item.children, depth + 1));
+        }
         if (item.collection) {
           collection = document.createElement("div");
           collection.className = "pt-global-navigation__collection";
@@ -758,7 +807,12 @@
     })
     .then((payload) => {
       title.textContent = payload.title || "Navigation";
-      navigationItems = Array.isArray(payload.items) ? payload.items : [];
+      if (payload?.schema !== "polyptich.www.navigation" || payload.schema_version !== 1
+        || !Array.isArray(payload.items)
+        || !payload.items.every((item) => validateNavigationNode(item))) {
+        throw new Error("Navigation returned an invalid response");
+      }
+      navigationItems = payload.items;
       preferredNavigationAvailable = Boolean(
         pageContext.navigation_id && containsNavigationId(navigationItems, pageContext.navigation_id)
       );

@@ -11,7 +11,23 @@ COLLECTION_SCHEMA = "polyptich.www.navigation.collection"
 COLLECTION_SCHEMA_VERSION = 1
 
 _NODE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
-_NODE_KEYS = {"id", "label", "type", "href", "children", "favorite", "collection"}
+NAVIGATION_ICONS = frozenset(
+    {
+        "agent",
+        "tasks",
+        "sources",
+        "task",
+        "overview",
+        "evidence",
+        "metrics",
+        "examples",
+        "releases",
+        "release",
+        "folder",
+        "document",
+    }
+)
+_NODE_KEYS = {"id", "label", "type", "href", "children", "favorite", "collection", "icon"}
 _COLLECTION_KEYS = {"type", "path", "href", "placeholder", "favorites"}
 _HIDDEN_NAMES = {"assets", ".assets", "manifest.json", "navigation.json"}
 
@@ -136,9 +152,10 @@ def directory_has_navigation_content(path, *, can_access=lambda _path: True):
     """Return whether a non-index directory contains a navigable document."""
     if not path.is_dir() or path.is_symlink():
         return False
-    index = path / "index.html"
-    if index.is_file() and not index.is_symlink():
-        return True
+    for name in ("index.html", "index.htm"):
+        index = path / name
+        if index.is_file() and not index.is_symlink():
+            return True
     manifest = path / "manifest.json"
     if manifest.is_file() and not manifest.is_symlink():
         try:
@@ -201,6 +218,9 @@ def _validate_node(
     favorite = value.get("favorite", False)
     if type(favorite) is not bool:
         raise ValueError(f"Navigation node {node_id!r} favorite must be a boolean")
+    icon = value.get("icon")
+    if "icon" in value and icon not in NAVIGATION_ICONS:
+        raise ValueError(f"Navigation node {node_id!r} has an invalid icon")
     href = value.get("href")
     if href is not None:
         href = _normalize_href(href, mount_url=mount_url)
@@ -223,6 +243,8 @@ def _validate_node(
         node["href"] = href
     if favorite:
         node["favorite"] = True
+    if "icon" in value:
+        node["icon"] = icon
     if collection is not None:
         node["collection"] = collection
     if scope is not None:
@@ -277,11 +299,16 @@ def _validate_collection(value, node_id, source, *, base_dir, mount_url):
             "favorites": favorites,
         }
     if collection_type == "endpoint":
-        if mount_url is None or set(value) - {"type", "href", "placeholder"}:
+        if set(value) - {"type", "href", "placeholder"}:
             raise ValueError(f"Navigation collection {node_id!r} has invalid endpoint options")
+        href = _normalize_href(value.get("href"), mount_url=mount_url)
+        if mount_url is None and not urlsplit(href).path.startswith("/endpoint/"):
+            raise ValueError(
+                f"Navigation collection {node_id!r} must use a local endpoint href"
+            )
         return {
             "type": "endpoint",
-            "href": _normalize_href(value.get("href"), mount_url=mount_url),
+            "href": href,
             "placeholder": placeholder.strip(),
         }
     raise ValueError(f"Navigation collection {node_id!r} has an invalid type")
@@ -332,6 +359,8 @@ def _serialize_node(node, *, can_access, collection_href, script_root):
     if node["type"] == "section" and node.get("children") and not children:
         return None
     result = {key: node[key] for key in ("id", "label", "type")}
+    if "icon" in node:
+        result["icon"] = node["icon"]
     if "href" in node:
         result["href"] = prefix_local_url(node["href"], script_root)
     if node.get("favorite"):
@@ -366,6 +395,10 @@ def _assign_paths(node, base_dir, endpoint_paths):
         node["_collection_path"] = (base_dir / collection["path"]).resolve()
     elif collection is not None and collection["type"] == "endpoint":
         node["_collection_path"] = _path_for_href(collection["href"], base_dir, endpoint_paths)
+        if node["_collection_path"] is None:
+            raise ValueError(
+                f"Navigation collection {node['id']!r} does not target a registered endpoint"
+            )
     if "href" in node:
         node["_path"] = _path_for_href(node["href"], base_dir, endpoint_paths)
     for child in node.get("children", []):

@@ -269,7 +269,19 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_global_navigati
                 "schema": "polyptich.www.navigation",
                 "schema_version": 1,
                 "title": "Iomix",
-                "items": [{"id": "agent", "label": "Agent", "type": "section"}],
+                "items": [
+                    {"id": "agent", "label": "Agent", "type": "section", "icon": "agent"},
+                    {
+                        "id": "global-agent-runs",
+                        "label": "All agent runs",
+                        "type": "collection",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "/endpoint/private/agent/api/v1/navigation/agent-runs",
+                            "placeholder": "Find an agent run",
+                        },
+                    },
+                ],
             }
         )
     )
@@ -363,12 +375,18 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_global_navigati
         "/api/v1/navigation", headers=auth("viewer@example.test")
     ).get_json()
     contributed = viewer_navigation["items"][0]["children"][0]
+    assert viewer_navigation["items"][0]["icon"] == "agent"
     assert contributed["href"] == "/endpoint/private/agent/"
     assert contributed["collection"] == {
         "type": "endpoint",
         "href": "/endpoint/private/agent/api/v1/navigation/agent-runs",
         "placeholder": "Find an agent run",
     }
+    global_collection = viewer_navigation["items"][1]
+    assert global_collection["id"] == "global-agent-runs"
+    assert global_collection["collection"]["href"] == (
+        "/endpoint/private/agent/api/v1/navigation/agent-runs"
+    )
     assert (
         client.get(
             "/endpoint/private/agent/control", headers=auth("viewer@example.test")

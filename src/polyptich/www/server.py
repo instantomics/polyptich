@@ -210,7 +210,7 @@ def create_app(
                     "browse_href": url_for("browse", subpath=rel, browse=1)
                     if item_manifest is not None
                     or item_endpoint is not None
-                    or (is_dir and (path / "index.html").is_file())
+                    or (is_dir and _directory_index(path) is not None)
                     else None,
                 }
             )
@@ -247,8 +247,8 @@ def create_app(
         if target.is_dir():
             if filename and not filename.endswith("/"):
                 return redirect(url_for("download", filename=filename.rstrip("/") + "/"))
-            index = target / "index.html"
-            if index.is_file() and not index.is_symlink():
+            index = _directory_index(target)
+            if index is not None:
                 return app.response_class(
                     index.read_bytes(), content_type="text/html; charset=utf-8"
                 )
@@ -292,13 +292,19 @@ def create_app(
             )
         return jsonify(payload)
 
-    @app.get("/api/v1/navigation/collections/<node_id>")
-    def navigation_directory_collection(node_id):
+    @app.get("/api/v1/navigation/collections/<node_id>", defaults={"subpath": ""})
+    @app.get("/api/v1/navigation/collections/<node_id>/<path:subpath>")
+    def navigation_directory_collection(node_id, subpath):
         node = app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].get(node_id)
         collection = node.get("collection") if node is not None else None
         if collection is None or collection.get("type") != "directory":
             abort(404)
-        current = safe_path(collection["path"])
+        collection_root = safe_path(collection["path"])
+        current = (collection_root / subpath).resolve()
+        if current != collection_root and collection_root not in current.parents:
+            abort(403)
+        if _has_symlink(collection_root, current):
+            abort(403)
         require_scope(path_scope(current))
         if not current.is_dir():
             abort(404)
@@ -310,7 +316,7 @@ def create_app(
 
         visible = {}
         for path in sorted(current.iterdir(), key=lambda item: item.name.casefold()):
-            if path.is_symlink() or is_hidden_name(path.name):
+            if path.is_symlink() or _is_hidden_collection_name(path.name):
                 continue
             if not has_scope(path_scope(path)):
                 continue
@@ -318,12 +324,13 @@ def create_app(
                 path,
                 base_dir,
                 node_id,
+                collection_root=collection_root,
                 can_access=lambda child: has_scope(path_scope(child)),
             )
             if item is not None:
                 visible[path.name] = item
 
-        favorite_names = collection.get("favorites", [])
+        favorite_names = collection.get("favorites", []) if not subpath else []
         favorites = []
         for name in favorite_names:
             item = visible.get(name)
@@ -643,8 +650,8 @@ def _item_href(rel, manifest, endpoint, is_dir, path=None):
     if endpoint is not None:
         return _request_local_url(_endpoint_href(rel))
     if is_dir:
-        index = path / "index.html" if path is not None else None
-        if index is not None and index.is_file() and not index.is_symlink():
+        index = _directory_index(path) if path is not None else None
+        if index is not None:
             return url_for("download", filename=rel.rstrip("/") + "/")
         return url_for("browse", subpath=rel)
     return url_for("download", filename=rel)
@@ -671,7 +678,9 @@ def _bounded_positive_int_arg(name, default, *, maximum):
     return value
 
 
-def _directory_navigation_item(path, base_dir, collection_id, *, can_access):
+def _directory_navigation_item(
+    path, base_dir, collection_id, *, collection_root, can_access
+):
     is_directory = path.is_dir()
     is_html = path.is_file() and path.suffix.casefold() in {".html", ".htm"}
     if is_directory and not directory_has_navigation_content(path, can_access=can_access):
@@ -689,22 +698,65 @@ def _directory_navigation_item(path, base_dir, collection_id, *, can_access):
                 value = {}
             if value.get("schema") == ENDPOINT_SCHEMA:
                 endpoint = _request_local_url(_endpoint_href(relative))
-        index = path / "index.html"
+        index = _directory_index(path)
         if endpoint is not None:
             href = endpoint
-        elif index.is_file() and not index.is_symlink():
+        elif index is not None:
             href = url_for("download", filename=relative.rstrip("/") + "/")
         else:
             href = url_for("browse", subpath=relative, browse=1)
     else:
         href = url_for("download", filename=relative)
     digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
-    return {
+    expandable = is_directory and _directory_has_navigation_children(
+        path, can_access=can_access
+    )
+    item = {
         "id": f"{collection_id}.item.{digest}",
         "label": path.name,
-        "type": "page",
+        "type": "collection" if expandable else "page",
         "href": href,
+        "icon": "folder" if is_directory else "document",
     }
+    if expandable:
+        child_subpath = path.relative_to(collection_root).as_posix()
+        item["collection"] = {
+            "type": "directory",
+            "href": url_for(
+                "navigation_directory_collection",
+                node_id=collection_id,
+                subpath=child_subpath,
+            ),
+            "placeholder": f"Search {path.name}",
+        }
+    return item
+
+
+def _directory_index(path):
+    for name in ("index.html", "index.htm"):
+        index = path / name
+        if index.is_file() and not index.is_symlink():
+            return index
+    return None
+
+
+def _is_hidden_collection_name(name):
+    return is_hidden_name(name) or name.casefold() in {"index.html", "index.htm"}
+
+
+def _directory_has_navigation_children(path, *, can_access):
+    try:
+        children = path.iterdir()
+    except OSError:
+        return False
+    for child in children:
+        if child.is_symlink() or _is_hidden_collection_name(child.name) or not can_access(child):
+            continue
+        if child.is_file() and child.suffix.casefold() in {".html", ".htm"}:
+            return True
+        if child.is_dir() and directory_has_navigation_content(child, can_access=can_access):
+            return True
+    return False
 
 
 def _report_ancestor(base_dir, path):
