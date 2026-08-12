@@ -5,6 +5,7 @@ from flask import current_app, url_for
 
 PAGE_CONTEXT_SCHEMA = "polyptich.www.page-context"
 PAGE_CONTEXT_SCHEMA_VERSION = 1
+PAGE_PROTOCOL_VERSION = 1
 
 
 def render_workspace_document(
@@ -39,7 +40,9 @@ def render_workspace_document(
         f' class="{escape(str(main_class), quote=True)}"' if main_class is not None else ""
     )
     stylesheet_html = "\n".join(
-        f'  <link rel="stylesheet" href="{escape(str(url), quote=True)}">' for url in stylesheets
+        f'  <link rel="stylesheet" href="{escape(str(url), quote=True)}" '
+        'data-polyptich-page-resource>'
+        for url in stylesheets
     )
     if stylesheet_html:
         stylesheet_html += "\n"
@@ -57,10 +60,11 @@ def render_workspace_document(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title_html}</title>
-  <link rel="stylesheet" href="{escape(navigation_stylesheet_url, quote=True)}">
+  <link rel="stylesheet" href="{escape(navigation_stylesheet_url, quote=True)}"
+        data-polyptich-navigation-persistent>
 {stylesheet_html}{head_html}
 </head>
-<body data-polyptich-navigation-host>
+<body data-polyptich-navigation-host data-polyptich-page-version="{PAGE_PROTOCOL_VERSION}">
   <a class="pt-global-navigation__skip" href="#pt-global-navigation-main">Skip to content</a>
   <div id="pt-global-navigation-shell" data-polyptich-navigation-shell
        data-navigation-url="{escape(navigation_url, quote=True)}">
@@ -88,7 +92,8 @@ def render_workspace_document(
 {content_html}
   </main>
 {body_end_html}
-  <script src="{escape(navigation_script_url, quote=True)}" defer></script>
+  <script src="{escape(navigation_script_url, quote=True)}" defer
+          data-polyptich-navigation-persistent></script>
 </body>
 </html>
 """

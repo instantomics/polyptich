@@ -1,10 +1,21 @@
 (function () {
+  let active = true;
+  const requestControllers = new Set();
   const config = JSON.parse(document.getElementById("polyptich-overview-config").textContent);
   const controls = document.getElementById("overview-controls");
   const grid = document.getElementById("overview-grid");
   const summary = document.getElementById("overview-summary");
   const loadButton = document.getElementById("overview-load");
   const state = { offset: 0, limit: config.pageSize || 24, total: 0 };
+
+  function unmount() {
+    active = false;
+    window.removeEventListener("polyptich:before-page-swap", unmount);
+    requestControllers.forEach((controller) => controller.abort());
+    requestControllers.clear();
+  }
+
+  window.addEventListener("polyptich:before-page-swap", unmount);
 
   function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
@@ -73,17 +84,23 @@
   }
 
   function load(reset) {
+    if (!active) return;
     if (reset) {
       state.offset = 0;
       grid.innerHTML = "";
     }
-    fetch(endpointUrl(reset)).then((response) => response.json()).then((payload) => {
+    const controller = new AbortController();
+    requestControllers.add(controller);
+    fetch(endpointUrl(reset), {signal: controller.signal}).then((response) => response.json()).then((payload) => {
+      if (!active) return;
       state.total = payload.total;
       state.offset = payload.offset + payload.items.length;
       for (const item of payload.items) grid.append(renderItem(item));
       summary.textContent = `${Math.min(state.offset, state.total)} of ${state.total} item${state.total === 1 ? "" : "s"}`;
       loadButton.hidden = state.offset >= state.total;
-    });
+    }).catch((error) => {
+      if (error.name !== "AbortError") summary.textContent = "Overview is temporarily unavailable";
+    }).finally(() => requestControllers.delete(controller));
   }
 
   renderControls();

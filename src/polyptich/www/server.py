@@ -419,11 +419,18 @@ def create_app(
         response = send_from_directory(
             Path(__file__).parent / "static", filename, as_attachment=False
         )
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
         return response
 
     @app.after_request
     def secure_response(response):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' https://cdn.plot.ly https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self'; "
+            "img-src 'self' data: https:; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'",
+        )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Cache-Control", "no-store")

@@ -271,8 +271,8 @@ class Page(ComponentContainer):
     <div id="report-root">
       {body}
     </div>"""
-        body_end = """  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
+        body_end = """  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" data-polyptich-script="once"></script>
+  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js" data-polyptich-script="once"></script>
   <script src="/static/polyptich-www.js"></script>"""
         return render_workspace_document(
             title,

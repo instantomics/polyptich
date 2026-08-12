@@ -1,6 +1,24 @@
 (function () {
   const renderedPlotly = new Set();
   const renderedTables = new Set();
+  const tables = new Set();
+  const requestControllers = new Set();
+  let active = true;
+
+  function unmount() {
+    if (!active) return;
+    active = false;
+    window.removeEventListener("polyptich:before-page-swap", unmount);
+    requestControllers.forEach((controller) => controller.abort());
+    requestControllers.clear();
+    tables.forEach((table) => table.destroy());
+    tables.clear();
+    document.querySelectorAll(".plotly[data-component-id]").forEach((node) => {
+      if (window.Plotly) Plotly.purge(node);
+    });
+  }
+
+  window.addEventListener("polyptich:before-page-swap", unmount);
 
   function reportPath() {
     const match = window.location.pathname.match(/^\/report\/(.*)$/);
@@ -26,6 +44,14 @@
 
   function isVisible(node) {
     return !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+  }
+
+  function fetchJson(url) {
+    const controller = new AbortController();
+    requestControllers.add(controller);
+    return fetch(url, {signal: controller.signal})
+      .then((response) => response.json())
+      .finally(() => requestControllers.delete(controller));
   }
 
   function activeTabId(groupId, tabs) {
@@ -70,9 +96,12 @@
       const id = node.dataset.componentId;
       if (renderedPlotly.has(id) || !isVisible(node)) return;
       renderedPlotly.add(id);
-      fetch(node.dataset.asset || dataUrl(id)).then((r) => r.json()).then((figure) => {
+      fetchJson(node.dataset.asset || dataUrl(id)).then((figure) => {
+        if (!active) return;
         const config = Object.assign({ displaylogo: false, responsive: true }, parseJson(node.dataset.config, {}));
         Plotly.newPlot(node, figure.data || [], figure.layout || {}, config);
+      }).catch((error) => {
+        if (error.name !== "AbortError" && active) node.textContent = "Plot is temporarily unavailable";
       });
     });
   }
@@ -83,14 +112,17 @@
       const id = node.dataset.componentId;
       if (renderedTables.has(id) || !isVisible(node)) return;
       renderedTables.add(id);
-      fetch(dataUrl(id)).then((r) => r.json()).then((rows) => {
+      fetchJson(dataUrl(id)).then((rows) => {
+        if (!active) return;
         const visible = parseJson(node.dataset.visibleColumns, null);
         const configured = parseJson(node.dataset.columns, []);
         const sourceColumns = configured.length ? configured : Object.keys(rows[0] || {});
         const columns = sourceColumns
           .filter((column) => !visible || visible.includes(column))
           .map((column) => ({ title: column, field: column, headerFilter: true }));
-        new Tabulator(node, { data: rows, columns, layout: "fitDataStretch", pagination: true, paginationSize: 25 });
+        tables.add(new Tabulator(node, { data: rows, columns, layout: "fitDataStretch", pagination: true, paginationSize: 25 }));
+      }).catch((error) => {
+        if (error.name !== "AbortError" && active) node.textContent = "Table is temporarily unavailable";
       });
     });
   }

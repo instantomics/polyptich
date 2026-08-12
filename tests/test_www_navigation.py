@@ -33,10 +33,17 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
         navigation_id="tasks",
     )
     assert document.count("data-polyptich-navigation-shell") == 1
+    assert 'data-polyptich-page-version="1"' in document
+    assert document.count("data-polyptich-navigation-persistent") == 2
     assert 'href="/static/polyptich-navigation.css"' in document
     assert 'src="/static/polyptich-navigation.js"' in document
     assert 'data-navigation-url="/api/v1/navigation"' in document
     assert '"navigation_id":"tasks"' in document
+
+    styled = render_workspace_document(
+        "Styled", "content", stylesheets=("/page.css",), head_html="<style>main { color: red; }</style>"
+    )
+    assert 'href="/page.css" data-polyptich-page-resource' in styled
 
     docs = tmp_path / "www" / "docs"
     docs.mkdir(parents=True)

@@ -103,6 +103,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert client.post("/delete/public.txt", headers=regular).status_code == 404
     root_page = client.get("/", headers=regular)
     assert root_page.status_code == 200
+    assert "default-src 'self'" in root_page.headers["Content-Security-Policy"]
     assert b"public.txt" in root_page.data
     assert b"private/" not in root_page.data
     assert client.get("/report-data/unsafe-report/plot", headers=regular).status_code == 403

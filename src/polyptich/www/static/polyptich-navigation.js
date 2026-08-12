@@ -26,7 +26,7 @@
     actionsRoot.hidden = true;
     sidebar.append(actionsRoot);
   }
-  const contextElement = document.getElementById("pt-global-navigation-context");
+  let contextElement = document.getElementById("pt-global-navigation-context");
   let pageContext = {navigation_id: null, toc: true};
   try {
     if (contextElement) pageContext = JSON.parse(contextElement.textContent);
@@ -36,6 +36,33 @@
   let controlIndex = 0;
   let returnFocus = null;
   let preferredNavigationAvailable = false;
+  let navigationItems = [];
+  let pageController = null;
+  let navigationSequence = 0;
+  let currentPageUrl = new URL(window.location.href);
+  const navigationStateKey = "polyptichNavigation";
+  const loadedScripts = new Set();
+  const navigationScriptUrl = document.currentScript?.src || "";
+
+  const isNavigationAsset = (url) => /\/static\/polyptich-navigation\.(?:js|css)(?:[?#]|$)/.test(url);
+  const isCurrentNavigationAsset = (url) => {
+    const current = new URL(navigationScriptUrl || window.location.href);
+    const candidate = new URL(url, window.location.href);
+    const currentBase = current.pathname.replace(/polyptich-navigation\.js$/, "");
+    return candidate.pathname === `${currentBase}polyptich-navigation.js`
+      || candidate.pathname === `${currentBase}polyptich-navigation.css`;
+  };
+
+  for (const element of document.head.querySelectorAll("link[rel~='stylesheet'], style, meta:not([charset])")) {
+    if (element.hasAttribute("data-polyptich-navigation-persistent")) continue;
+    if (element.tagName === "LINK" && isCurrentNavigationAsset(element.href)) continue;
+    element.dataset.polyptichPageResource = "";
+  }
+  for (const script of document.scripts) {
+    if (!script.src || script.hasAttribute("data-polyptich-navigation-persistent") || isCurrentNavigationAsset(script.src)) continue;
+    loadedScripts.add(script.src);
+    script.dataset.polyptichPageScript = "";
+  }
 
   const isActive = (href) => {
     const target = new URL(href, window.location.href);
@@ -55,6 +82,31 @@
       anchor.setAttribute("aria-current", "page");
     } else if (!preferredNavigationAvailable && item.href && isActive(item.href)) {
       anchor.setAttribute("aria-current", "page");
+    }
+  };
+
+  const applyActiveNavigation = () => {
+    preferredNavigationAvailable = Boolean(
+      pageContext.navigation_id && containsNavigationId(navigationItems, pageContext.navigation_id)
+    );
+    const anchors = [...listRoot.querySelectorAll("a.pt-global-navigation__link")];
+    anchors.forEach((anchor) => anchor.removeAttribute("aria-current"));
+    let active = null;
+    if (preferredNavigationAvailable) {
+      active = anchors.find((anchor) => anchor.dataset.navigationId === pageContext.navigation_id) || null;
+    }
+    if (!active) active = anchors.find((anchor) => isActive(anchor.href)) || null;
+    if (active) {
+      active.setAttribute("aria-current", "page");
+      for (let panel = active.parentElement; panel && panel !== listRoot; panel = panel.parentElement) {
+        if (!panel.id?.startsWith("pt-global-navigation-panel-")) continue;
+        panel.hidden = false;
+        const disclosure = listRoot.querySelector(`[aria-controls="${CSS.escape(panel.id)}"]`);
+        if (disclosure) {
+          disclosure.setAttribute("aria-expanded", "true");
+          disclosure.setAttribute("aria-label", disclosure.getAttribute("aria-label")?.replace(/^Expand /, "Collapse ") || "Collapse");
+        }
+      }
     }
   };
 
@@ -113,6 +165,7 @@
     anchor.className = "pt-global-navigation__link";
     anchor.href = item.href;
     anchor.textContent = item.label;
+    anchor.dataset.navigationId = item.id;
     markActive(anchor, item);
     row.append(anchor);
     li.append(row);
@@ -243,6 +296,7 @@
         destination.className = "pt-global-navigation__link";
         destination.href = item.href;
         destination.textContent = item.label;
+        destination.dataset.navigationId = item.id;
         markActive(destination, item);
       } else {
         destination = document.createElement("span");
@@ -278,6 +332,8 @@
   };
 
   const renderToc = () => {
+    toc.replaceChildren();
+    toc.hidden = true;
     if (pageContext.toc === false) return;
     const headings = [...document.querySelectorAll("h2, h3")].filter((heading) => !heading.closest("#pt-global-navigation-shell"));
     const entries = headings.map((heading) => {
@@ -305,6 +361,326 @@
     toc.replaceChildren(heading, ul);
     toc.hidden = false;
   };
+
+  const pageState = (url, scrollX = window.scrollX, scrollY = window.scrollY) => ({
+    ...(history.state && typeof history.state === "object" ? history.state : {}),
+    [navigationStateKey]: {url: String(url), scrollX, scrollY},
+  });
+
+  const rememberScroll = () => {
+    history.replaceState(pageState(window.location.href), "", window.location.href);
+  };
+
+  const absoluteResourceUrl = (element, attribute, baseUrl) => {
+    const value = element.getAttribute(attribute);
+    return value ? new URL(value, baseUrl).href : "";
+  };
+
+  const comparableResourceUrl = (element, attribute, baseUrl) => {
+    const url = absoluteResourceUrl(element, attribute, baseUrl);
+    if (!url) return "";
+    const parsed = new URL(url);
+    if (isNavigationAsset(parsed.href) || parsed.pathname.endsWith("/static/polyptich-www.css")) {
+      return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+    }
+    return parsed.href;
+  };
+
+  const resourceKey = (element, baseUrl) => {
+    if (element.tagName === "LINK") return `link:${comparableResourceUrl(element, "href", baseUrl)}`;
+    if (element.tagName === "STYLE") return `style:${element.textContent}`;
+    if (element.tagName === "META") return `meta:${element.getAttribute("name") || element.getAttribute("property") || ""}`;
+    return `${element.tagName}:${element.outerHTML}`;
+  };
+
+  const copyAttributes = (source, target, baseUrl) => {
+    for (const attribute of source.attributes) {
+      let value = attribute.value;
+      if (attribute.name === "src" || attribute.name === "href") value = new URL(value, baseUrl).href;
+      target.setAttribute(attribute.name, value);
+    }
+  };
+
+  const parsePage = (html, responseUrl) => {
+    const documentNode = new DOMParser().parseFromString(html, "text/html");
+    const host = documentNode.body;
+    if (!host.matches("[data-polyptich-navigation-host]")) {
+      throw new Error("Destination is not a managed WorkspacePage");
+    }
+    if (host.dataset.polyptichPageVersion && host.dataset.polyptichPageVersion !== "1") {
+      throw new Error("Destination WorkspacePage protocol is unsupported");
+    }
+    if (documentNode.querySelector("base")) throw new Error("Managed pages cannot define a base URL");
+    const mains = documentNode.querySelectorAll("main#pt-global-navigation-main");
+    const contexts = documentNode.querySelectorAll("#pt-global-navigation-context");
+    if (mains.length !== 1 || contexts.length !== 1) throw new Error("Destination has an invalid workspace shell");
+    let context;
+    try {
+      context = JSON.parse(contexts[0].textContent);
+    } catch (_error) {
+      throw new Error("Destination page context is invalid");
+    }
+    if (context?.schema !== "polyptich.www.page-context" || context.schema_version !== 1) {
+      throw new Error("Destination page context is unsupported");
+    }
+    const inlineScripts = [...documentNode.scripts].filter((script) =>
+      !script.src && (!script.type || ["text/javascript", "application/javascript", "module"].includes(script.type))
+    );
+    if (inlineScripts.length) throw new Error("Managed pages cannot use executable inline scripts");
+    return {
+      documentNode,
+      main: mains[0],
+      contextElement: contexts[0],
+      context,
+      title: documentNode.title,
+      responseUrl,
+      resources: [...documentNode.head.querySelectorAll("link[rel~='stylesheet'], style, meta:not([charset])")]
+        .filter((element) =>
+          !element.hasAttribute("data-polyptich-navigation-persistent")
+          && (element.tagName !== "LINK" || !isCurrentNavigationAsset(absoluteResourceUrl(element, "href", responseUrl)))
+        ),
+      scripts: [...documentNode.scripts].filter((script) =>
+        script.src
+        && !script.hasAttribute("data-polyptich-navigation-persistent")
+        && absoluteResourceUrl(script, "src", responseUrl) !== navigationScriptUrl
+        && !isCurrentNavigationAsset(absoluteResourceUrl(script, "src", responseUrl))
+      ),
+    };
+  };
+
+  const loadStylesheet = (source, baseUrl) => new Promise((resolve, reject) => {
+    const link = document.createElement("link");
+    copyAttributes(source, link, baseUrl);
+    link.dataset.polyptichPageResource = "";
+    link.addEventListener("load", () => resolve(link), {once: true});
+    link.addEventListener("error", () => reject(new Error(`Could not load ${link.href}`)), {once: true});
+    document.head.append(link);
+  });
+
+  const prepareResources = async (page) => {
+    const existing = new Map(
+      [...document.head.querySelectorAll("[data-polyptich-page-resource]")]
+        .map((element) => [resourceKey(element, window.location.href), element])
+    );
+    const desiredKeys = new Set();
+    const additions = [];
+    try {
+      for (const source of page.resources) {
+        const key = resourceKey(source, page.responseUrl);
+        desiredKeys.add(key);
+        if (existing.has(key)) continue;
+        let element;
+        if (source.tagName === "LINK") element = await loadStylesheet(source, page.responseUrl);
+        else {
+          element = document.createElement(source.tagName.toLowerCase());
+          copyAttributes(source, element, page.responseUrl);
+          element.textContent = source.textContent;
+          element.dataset.polyptichPageResource = "";
+          document.head.append(element);
+        }
+        additions.push(element);
+      }
+    } catch (error) {
+      additions.forEach((element) => element.remove());
+      throw error;
+    }
+    return {
+      additions,
+      obsolete: [...existing].filter(([key]) => !desiredKeys.has(key)).map(([, element]) => element),
+    };
+  };
+
+  const executeScripts = async (page) => {
+    for (const source of page.scripts) {
+      const src = absoluteResourceUrl(source, "src", page.responseUrl);
+      if (!src) throw new Error("Managed page script URL is invalid");
+      if (source.dataset.polyptichScript === "once" && loadedScripts.has(src)) continue;
+      const script = document.createElement("script");
+      copyAttributes(source, script, page.responseUrl);
+      script.removeAttribute("nonce");
+      script.removeAttribute("defer");
+      script.async = false;
+      script.dataset.polyptichPageScript = "";
+      await new Promise((resolve, reject) => {
+        script.addEventListener("load", resolve, {once: true});
+        script.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), {once: true});
+        document.body.append(script);
+      });
+      loadedScripts.add(src);
+    }
+  };
+
+  const verifyScripts = async (page) => {
+    for (const source of page.scripts) {
+      const src = absoluteResourceUrl(source, "src", page.responseUrl);
+      if (!src || loadedScripts.has(src)) continue;
+      const url = new URL(src);
+      if (url.origin !== window.location.origin) continue;
+      const response = await fetch(url, {credentials: "same-origin"});
+      if (!response.ok) throw new Error(`Could not load ${src}`);
+    }
+  };
+
+  const restorePosition = (url, scrollPosition) => {
+    if (url.hash) {
+      const target = document.getElementById(decodeURIComponent(url.hash.slice(1)));
+      if (target) {
+        target.scrollIntoView();
+        return;
+      }
+    }
+    if (scrollPosition) window.scrollTo(scrollPosition.x, scrollPosition.y);
+    else window.scrollTo(0, 0);
+  };
+
+  const commitPage = async (page, requestedUrl, {historyMode, scrollPosition}) => {
+    const prepared = await prepareResources(page);
+    try {
+      await verifyScripts(page);
+    } catch (error) {
+      prepared.additions.forEach((element) => element.remove());
+      throw error;
+    }
+    const oldMain = document.getElementById("pt-global-navigation-main");
+    const oldContext = contextElement;
+    const oldScripts = [...document.querySelectorAll("script[data-polyptich-page-script]")];
+    let didSwap = false;
+    try {
+      window.dispatchEvent(new CustomEvent("polyptich:before-page-swap", {detail: {url: page.responseUrl}}));
+      const importedMain = document.importNode(page.main, true);
+      importedMain.querySelectorAll("script[src]").forEach((script) => script.remove());
+      const importedContext = document.importNode(page.contextElement, true);
+      oldMain.replaceWith(importedMain);
+      oldContext.replaceWith(importedContext);
+      didSwap = true;
+      contextElement = importedContext;
+      pageContext = page.context;
+      document.title = page.title;
+      for (const element of prepared.obsolete) element.remove();
+      for (const script of oldScripts) script.remove();
+      document.body.className = page.documentNode.body.className;
+      for (const attribute of [...document.body.attributes]) {
+        if (attribute.name.startsWith("data-") && attribute.name !== "data-polyptich-navigation-host") {
+          document.body.removeAttribute(attribute.name);
+        }
+      }
+      for (const attribute of page.documentNode.body.attributes) {
+        if (attribute.name !== "class") document.body.setAttribute(attribute.name, attribute.value);
+      }
+      const finalUrl = new URL(page.responseUrl);
+      finalUrl.hash = new URL(requestedUrl).hash;
+      currentPageUrl = finalUrl;
+      if (historyMode === "push") history.pushState(pageState(finalUrl, 0, 0), "", finalUrl);
+      else if (historyMode === "replace") history.replaceState(pageState(finalUrl, 0, 0), "", finalUrl);
+      applyActiveNavigation();
+      renderToc();
+      if (shell.classList.contains("pt-global-navigation--open")) closeDrawer();
+      restorePosition(finalUrl, scrollPosition);
+      if (!scrollPosition && !finalUrl.hash) importedMain.focus({preventScroll: true});
+      await executeScripts(page);
+      window.dispatchEvent(new CustomEvent("polyptich:page-swap", {detail: {url: finalUrl.href}}));
+      return true;
+    } catch (error) {
+      prepared.additions.forEach((element) => element.remove());
+      if (didSwap) error.polyptichPageSwapped = true;
+      throw error;
+    }
+  };
+
+  const navigate = async (value, options = {}) => {
+    const url = new URL(value, window.location.href);
+    if (url.origin !== window.location.origin) {
+      window.location.assign(url);
+      return false;
+    }
+    if (url.hash && url.pathname === currentPageUrl.pathname && url.search === currentPageUrl.search) {
+      if (options.historyMode !== "pop" && url.href !== window.location.href) {
+        rememberScroll();
+        history.pushState(pageState(url, 0, 0), "", url);
+      }
+      restorePosition(url, options.scrollPosition || null);
+      return true;
+    }
+    if (options.historyMode !== "pop" && url.pathname === window.location.pathname && url.search === window.location.search) {
+      if (url.hash !== window.location.hash) {
+        rememberScroll();
+        history.pushState(pageState(url, 0, 0), "", url);
+        restorePosition(url);
+      }
+      return true;
+    }
+    if (options.historyMode === "pop" && url.pathname === currentPageUrl.pathname && url.search === currentPageUrl.search) {
+      restorePosition(url, options.scrollPosition || null);
+      return true;
+    }
+    if (options.historyMode !== "pop") rememberScroll();
+    if (pageController) pageController.abort();
+    const controller = new AbortController();
+    pageController = controller;
+    const sequence = ++navigationSequence;
+    let swapped = false;
+    shell.classList.add("pt-global-navigation--loading");
+    try {
+      const timeout = window.setTimeout(() => controller.abort(), 20000);
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: {Accept: "text/html", "X-Polyptich-Navigation": "partial"},
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      if (!response.ok || response.redirected && new URL(response.url).origin !== window.location.origin) {
+        throw new Error(`Navigation request failed (${response.status})`);
+      }
+      const contentType = response.headers.get("Content-Type") || "";
+      const disposition = response.headers.get("Content-Disposition") || "";
+      if (!contentType.toLowerCase().includes("text/html") || /attachment/i.test(disposition)) {
+        throw new Error("Destination is not an inline HTML page");
+      }
+      const page = parsePage(await response.text(), response.url);
+      if (controller.signal.aborted || sequence !== navigationSequence) return false;
+      swapped = await commitPage(page, url, {
+        historyMode: options.historyMode || "push",
+        scrollPosition: options.scrollPosition || null,
+      });
+      return true;
+    } catch (error) {
+      if (error.name === "AbortError" && sequence !== navigationSequence) return false;
+      if (swapped || error.polyptichPageSwapped || options.historyMode === "pop") window.location.reload();
+      else window.location.assign(url);
+      return false;
+    } finally {
+      if (pageController === controller) pageController = null;
+      if (sequence === navigationSequence) shell.classList.remove("pt-global-navigation--loading");
+    }
+  };
+
+  window.polyptichNavigate = (url) => navigate(url);
+  history.scrollRestoration = "manual";
+  if (!history.state?.[navigationStateKey]) {
+    history.replaceState(pageState(window.location.href), "", window.location.href);
+  }
+
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!anchor || anchor.hasAttribute("download") || anchor.dataset.polyptichReload != null) return;
+    if (anchor.target && anchor.target.toLowerCase() !== "_self") return;
+    const url = new URL(anchor.href, window.location.href);
+    if (!["http:", "https:"].includes(url.protocol) || url.origin !== window.location.origin) return;
+    if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash === window.location.hash) return;
+    event.preventDefault();
+    navigate(url);
+  });
+
+  window.addEventListener("popstate", (event) => {
+    const state = event.state?.[navigationStateKey];
+    const position = state ? {x: Number(state.scrollX || 0), y: Number(state.scrollY || 0)} : null;
+    navigate(window.location.href, {historyMode: "pop", scrollPosition: position});
+  });
 
   const waitForService = async (action, button, status) => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -382,11 +758,12 @@
     })
     .then((payload) => {
       title.textContent = payload.title || "Navigation";
-      const items = Array.isArray(payload.items) ? payload.items : [];
+      navigationItems = Array.isArray(payload.items) ? payload.items : [];
       preferredNavigationAvailable = Boolean(
-        pageContext.navigation_id && containsNavigationId(items, pageContext.navigation_id)
+        pageContext.navigation_id && containsNavigationId(navigationItems, pageContext.navigation_id)
       );
-      listRoot.replaceChildren(renderNodes(items));
+      listRoot.replaceChildren(renderNodes(navigationItems));
+      applyActiveNavigation();
       renderActions(Array.isArray(payload.actions) ? payload.actions : []);
     })
     .catch(() => {
