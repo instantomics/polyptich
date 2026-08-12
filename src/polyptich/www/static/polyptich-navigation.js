@@ -507,8 +507,10 @@
         const owner = heading.closest("[id]");
         id = owner ? owner.id : "";
       }
-      return {heading, id};
-    }).filter((entry) => entry.id && entry.heading.textContent.trim());
+      const labelRoot = heading.cloneNode(true);
+      labelRoot.querySelectorAll(".anchor-link").forEach((anchor) => anchor.remove());
+      return {heading, id, label: labelRoot.textContent.trim()};
+    }).filter((entry) => entry.id && entry.label);
     if (!entries.length) return;
     const heading = document.createElement("div");
     heading.className = "pt-global-navigation__toc-title";
@@ -519,7 +521,7 @@
       li.className = `pt-global-navigation__toc-level-${entry.heading.tagName === "H3" ? "3" : "2"}`;
       const anchor = document.createElement("a");
       anchor.href = `${window.location.pathname}${window.location.search}#${encodeURIComponent(entry.id)}`;
-      anchor.textContent = entry.heading.textContent.trim();
+      anchor.textContent = entry.label;
       li.append(anchor);
       ul.append(li);
     });

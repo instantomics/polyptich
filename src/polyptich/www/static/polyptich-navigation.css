@@ -67,7 +67,7 @@
 
 #pt-global-navigation-shell .pt-global-navigation__toc-sidebar {
   position: fixed;
-  z-index: 2147482800;
+  z-index: 2147483000;
   inset: 0 0 0 auto;
   width: var(--pt-toc-width);
   padding: 1rem 0.8rem;
@@ -372,19 +372,41 @@
 }
 
 body[data-polyptich-navigation-host] {
-  margin-left: 18rem !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
-body[data-polyptich-navigation-host][data-polyptich-toc-visible] {
-  margin-right: 15rem !important;
+body[data-polyptich-navigation-host] .notebook-report,
+body[data-polyptich-navigation-host] .notebook-report .cell,
+body[data-polyptich-navigation-host] .notebook-report .output_wrapper,
+body[data-polyptich-navigation-host] .notebook-report .output_area,
+body[data-polyptich-navigation-host] .notebook-report .output_subarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+body[data-polyptich-navigation-host] .notebook-report .anchor-link {
+  margin-left: 0.12em;
+  opacity: 0;
+  text-decoration: none;
+}
+
+body[data-polyptich-navigation-host] .notebook-report :is(h1, h2, h3):hover .anchor-link,
+body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
+  opacity: 1;
+}
+
+@media (min-width: 64.001rem) {
+  body[data-polyptich-navigation-host] {
+    margin-left: 18rem !important;
+  }
+
+  body[data-polyptich-navigation-host][data-polyptich-toc-visible] {
+    margin-right: 15rem !important;
+  }
 }
 
 @media (max-width: 64rem) {
-  body[data-polyptich-navigation-host] {
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-  }
-
   #pt-global-navigation-shell .pt-global-navigation__mobile-controls {
     display: flex;
     position: fixed;
@@ -432,6 +454,11 @@ body[data-polyptich-navigation-host][data-polyptich-toc-visible] {
   #pt-global-navigation-shell.pt-global-navigation--navigation-open .pt-global-navigation__sidebar,
   #pt-global-navigation-shell.pt-global-navigation--toc-open .pt-global-navigation__toc-sidebar {
     transform: none;
+  }
+
+  #pt-global-navigation-shell.pt-global-navigation--navigation-open .pt-global-navigation__mobile-controls,
+  #pt-global-navigation-shell.pt-global-navigation--toc-open .pt-global-navigation__mobile-controls {
+    display: none;
   }
 
   #pt-global-navigation-shell.pt-global-navigation--navigation-open .pt-global-navigation__overlay,
