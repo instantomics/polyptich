@@ -21,14 +21,6 @@ h1, h2, h3 { line-height: 1.12; }
 .topbar h1, .report-header h1 { margin: 0 0 0.35rem; font-size: clamp(1.55rem, 4vw, 2.5rem); }
 .subtitle, .summary, .muted { color: #667085; }
 .server-tools { display: flex; align-items: center; justify-content: flex-end; gap: 0.7rem; flex-wrap: wrap; }
-.health { display: inline-flex; align-items: center; gap: 0.35rem; color: #667085; font-weight: 700; white-space: nowrap; }
-.health::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 999px; background: #667085; }
-.health-ok::before { background: #12b76a; }
-.health-restarting::before { background: #f79009; }
-.health-offline::before { background: #d92d20; }
-.restart-form { margin: 0; }
-.restart-form button { padding: 0.5rem 0.75rem; border: 1px solid #d0d5dd; border-radius: 0.55rem; background: white; color: #162033; font: inherit; cursor: pointer; }
-.restart-form button:disabled { cursor: wait; color: #667085; background: #f9fafb; }
 .controls { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.9rem 0 1.1rem; }
 .controls input { min-width: min(24rem, 100%); padding: 0.5rem 0.65rem; border: 1px solid #d0d5dd; border-radius: 0.55rem; background: white; color: #162033; }
 .controls button, .button-link { padding: 0.5rem 0.75rem; border: 1px solid #d0d5dd; border-radius: 0.55rem; background: white; color: #162033; text-decoration: none; font: inherit; cursor: pointer; }

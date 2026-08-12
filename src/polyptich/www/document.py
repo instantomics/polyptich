@@ -71,12 +71,16 @@ def render_workspace_document(
             aria-label="Close navigation" tabindex="-1"></button>
     <aside id="pt-global-navigation-sidebar" class="pt-global-navigation__sidebar"
            aria-label="Global navigation">
-      <div class="pt-global-navigation__heading" data-pt-navigation-title>Navigation</div>
-      <nav class="pt-global-navigation__nav" aria-label="Site" data-pt-navigation-list>
-        <p class="pt-global-navigation__status">Loading navigation…</p>
-      </nav>
-      <nav class="pt-global-navigation__toc" aria-label="On this page"
-           data-pt-navigation-toc hidden></nav>
+      <div class="pt-global-navigation__body">
+        <div class="pt-global-navigation__heading" data-pt-navigation-title>Navigation</div>
+        <nav class="pt-global-navigation__nav" aria-label="Site" data-pt-navigation-list>
+          <p class="pt-global-navigation__status">Loading navigation…</p>
+        </nav>
+        <nav class="pt-global-navigation__toc" aria-label="On this page"
+             data-pt-navigation-toc hidden></nav>
+      </div>
+      <div class="pt-global-navigation__actions" aria-label="Workspace actions"
+           data-pt-navigation-actions hidden></div>
     </aside>
   </div>
   <script id="pt-global-navigation-context" type="application/json">{context}</script>

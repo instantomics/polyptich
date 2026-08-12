@@ -117,6 +117,17 @@ def serialize_navigation(navigation, *, can_access, collection_href, script_root
     }
 
 
+def serialize_service_restart_action(control, *, health_url, script_root=""):
+    return {
+        "id": "service.restart",
+        "type": "service_restart",
+        "label": "Restart server",
+        "session_url": prefix_local_url(control["session_url"], script_root),
+        "restart_url": prefix_local_url(control["restart_url"], script_root),
+        "health_url": health_url,
+    }
+
+
 def is_hidden_name(name):
     return name.startswith(".") or name.casefold() in _HIDDEN_NAMES
 

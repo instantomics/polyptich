@@ -10,6 +10,22 @@
   const toggle = shell.querySelector(".pt-global-navigation__toggle");
   const overlay = shell.querySelector(".pt-global-navigation__overlay");
   const sidebar = shell.querySelector(".pt-global-navigation__sidebar");
+  let body = shell.querySelector(".pt-global-navigation__body");
+  if (!body) {
+    body = document.createElement("div");
+    body.className = "pt-global-navigation__body";
+    body.append(title, listRoot, toc);
+    sidebar.prepend(body);
+  }
+  let actionsRoot = shell.querySelector("[data-pt-navigation-actions]");
+  if (!actionsRoot) {
+    actionsRoot = document.createElement("div");
+    actionsRoot.className = "pt-global-navigation__actions";
+    actionsRoot.setAttribute("aria-label", "Workspace actions");
+    actionsRoot.setAttribute("data-pt-navigation-actions", "");
+    actionsRoot.hidden = true;
+    sidebar.append(actionsRoot);
+  }
   const contextElement = document.getElementById("pt-global-navigation-context");
   let pageContext = {navigation_id: null, toc: true};
   try {
@@ -290,6 +306,75 @@
     toc.hidden = false;
   };
 
+  const waitForService = async (action, button, status) => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      try {
+        const healthUrl = new URL(action.health_url, window.location.href);
+        healthUrl.searchParams.set("restart", String(Date.now()));
+        const response = await fetch(healthUrl, {cache: "no-store"});
+        if (response.ok) {
+          window.location.reload();
+          return;
+        }
+      } catch (_error) {
+        // The service is expected to be briefly unreachable while it restarts.
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }
+    status.textContent = "Server has not returned; reload manually.";
+    button.textContent = action.label;
+    button.disabled = false;
+  };
+
+  const makeServiceRestartAction = (action) => {
+    const host = document.createElement("div");
+    host.className = "pt-global-navigation__action";
+    const button = document.createElement("button");
+    button.className = "pt-global-navigation__action-button";
+    button.type = "button";
+    button.textContent = action.label;
+    const status = document.createElement("span");
+    status.className = "pt-global-navigation__action-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    button.addEventListener("click", async () => {
+      if (!window.confirm("Restart the web server? Active agent runs will continue.")) return;
+      button.disabled = true;
+      button.textContent = "Restarting...";
+      status.textContent = "Authorizing restart";
+      try {
+        const sessionResponse = await fetch(action.session_url, {cache: "no-store"});
+        const sessionPayload = await sessionResponse.json();
+        const csrfToken = sessionPayload?.data?.csrf_token;
+        if (!sessionResponse.ok || !csrfToken) throw new Error("Could not authorize restart");
+        const response = await fetch(action.restart_url, {
+          method: "POST",
+          cache: "no-store",
+          headers: {"Content-Type": "application/json", "X-Iomix-CSRF": csrfToken},
+          body: "{}",
+        });
+        if (!response.ok) throw new Error(`Restart request failed (${response.status})`);
+        status.textContent = "Waiting for server";
+        window.setTimeout(() => waitForService(action, button, status), 1200);
+      } catch (error) {
+        button.textContent = action.label;
+        button.disabled = false;
+        status.textContent = error.message;
+      }
+    });
+    host.append(button, status);
+    return host;
+  };
+
+  const renderActions = (actions) => {
+    const rendered = actions.flatMap((action) => {
+      if (action?.type === "service_restart") return [makeServiceRestartAction(action)];
+      return [];
+    });
+    actionsRoot.replaceChildren(...rendered);
+    actionsRoot.hidden = rendered.length === 0;
+  };
+
   fetch(shell.dataset.navigationUrl, {headers: {Accept: "application/json"}})
     .then((response) => {
       if (!response.ok) throw new Error(`Navigation request failed (${response.status})`);
@@ -302,6 +387,7 @@
         pageContext.navigation_id && containsNavigationId(items, pageContext.navigation_id)
       );
       listRoot.replaceChildren(renderNodes(items));
+      renderActions(Array.isArray(payload.actions) ? payload.actions : []);
     })
     .catch(() => {
       listRoot.replaceChildren();

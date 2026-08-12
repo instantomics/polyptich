@@ -127,7 +127,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert download.data == b"xlsx-data"
 
 
-def test_browser_exposes_registered_restart_control_only_to_operators(tmp_path):
+def test_navigation_exposes_registered_restart_action_only_to_operators(tmp_path):
     (tmp_path / "www").mkdir()
     app = server.create_app(
         tmp_path,
@@ -141,13 +141,26 @@ def test_browser_exposes_registered_restart_control_only_to_operators(tmp_path):
     )
     client = app.test_client()
 
-    viewer = client.get("/", headers=auth("viewer@example.test")).get_data(as_text=True)
-    operator = client.get("/", headers=auth("operator@example.test")).get_data(as_text=True)
+    viewer = client.get(
+        "/api/v1/navigation", headers=auth("viewer@example.test")
+    ).get_json()
+    operator = client.get(
+        "/api/v1/navigation",
+        headers=auth("operator@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    ).get_json()
 
-    assert "data-service-restart" not in viewer
-    assert "data-service-restart" in operator
-    assert 'data-session-url="/endpoint/agent/api/v1/session"' in operator
-    assert 'data-restart-url="/endpoint/agent/api/v1/service/restart"' in operator
+    assert viewer["actions"] == []
+    assert operator["actions"] == [
+        {
+            "id": "service.restart",
+            "type": "service_restart",
+            "label": "Restart server",
+            "session_url": "/gateway/endpoint/agent/api/v1/session",
+            "restart_url": "/gateway/endpoint/agent/api/v1/service/restart",
+            "health_url": "/gateway/healthz",
+        }
+    ]
 
 
 def test_overview_endpoint_uses_workspace_document(tmp_path):

@@ -4,15 +4,6 @@
         <p class="subtitle">Serving files from <code>{{ base_dir }}</code></p>
       </div>
       <div class="server-tools">
-        {% if service_restart_control %}
-          <span class="health health-ok" data-health-indicator>Server online</span>
-          <div class="restart-form">
-            <button type="button" data-service-restart
-                    data-session-url="{{ service_restart_control.session_url }}"
-                    data-restart-url="{{ service_restart_control.restart_url }}">Restart service</button>
-            <span class="muted" role="status" aria-live="polite" data-service-restart-status></span>
-          </div>
-        {% endif %}
         <span class="summary">{{ item_count }} item{% if item_count != 1 %}s{% endif %}</span>
       </div>
   </div>

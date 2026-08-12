@@ -108,62 +108,7 @@
     });
   }
 
-  function setServiceState(indicator, state, label) {
-    indicator.classList.remove("health-ok", "health-restarting", "health-offline");
-    indicator.classList.add("health-" + state);
-    indicator.textContent = label;
-  }
-
-  async function waitForService(button, indicator, status) {
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      try {
-        const response = await fetch("/healthz?restart=" + Date.now(), { cache: "no-store" });
-        if (response.ok) {
-          window.location.reload();
-          return;
-        }
-      } catch (_error) {
-        // Expected while the process is being replaced.
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-    }
-    setServiceState(indicator, "offline", "Service unavailable");
-    status.textContent = "Service has not returned; reload manually.";
-    button.disabled = false;
-  }
-
-  function initialiseServiceRestart() {
-    const button = document.querySelector("[data-service-restart]");
-    if (!button) return;
-    const indicator = document.querySelector("[data-health-indicator]");
-    const status = document.querySelector("[data-service-restart-status]");
-    button.addEventListener("click", async () => {
-      if (!window.confirm("Restart the Polyptich service? Active agent runs will continue.")) return;
-      button.disabled = true;
-      status.textContent = "Restarting...";
-      setServiceState(indicator, "restarting", "Restarting service");
-      try {
-        const sessionResponse = await fetch(button.dataset.sessionUrl, { cache: "no-store" });
-        const sessionPayload = await sessionResponse.json();
-        if (!sessionResponse.ok) throw new Error("Could not authorize restart");
-        const response = await fetch(button.dataset.restartUrl, {
-          method: "POST",
-          cache: "no-store",
-          headers: { "Content-Type": "application/json", "X-Iomix-CSRF": sessionPayload.data.csrf_token },
-          body: "{}",
-        });
-        if (!response.ok) throw new Error("Restart request failed (" + response.status + ")");
-        window.setTimeout(() => waitForService(button, indicator, status), 1200);
-      } catch (error) {
-        setServiceState(indicator, "offline", "Restart failed");
-        status.textContent = error.message;
-        button.disabled = false;
-      }
-    });
-  }
-
   initialiseTabs();
   initialiseDownloads();
-  initialiseServiceRestart();
   queueRender(document);
 })();

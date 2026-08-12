@@ -41,6 +41,7 @@ from .navigation import (
     is_hidden_name,
     load_navigation,
     serialize_navigation,
+    serialize_service_restart_action,
 )
 from .page import SCHEMA
 
@@ -226,11 +227,6 @@ def create_app(
             base_dir=base_dir,
             item_count=len(items),
             query=query,
-            service_restart_control=(
-                app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"]
-                if has_scope(SERVICE_RESTART)
-                else None
-            ),
         )
         return render_workspace_page(
             f"polyptich www: /{subpath}",
@@ -284,6 +280,16 @@ def create_app(
             ),
             script_root=request.script_root,
         )
+        restart_control = app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"]
+        payload["actions"] = []
+        if restart_control is not None and has_scope(SERVICE_RESTART):
+            payload["actions"].append(
+                serialize_service_restart_action(
+                    restart_control,
+                    health_url=url_for("healthz"),
+                    script_root=request.script_root,
+                )
+            )
         return jsonify(payload)
 
     @app.get("/api/v1/navigation/collections/<node_id>")
