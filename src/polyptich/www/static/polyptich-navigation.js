@@ -253,7 +253,9 @@
     if (!Array.isArray(payload.favorites) || !payload.favorites.every((item) => validateNavigationNode(item))) return false;
     return Number.isInteger(payload.page) && payload.page > 0
       && Number.isInteger(payload.page_size) && payload.page_size > 0
-      && (payload.total === null || Number.isInteger(payload.total) && payload.total >= 0)
+      && (Number.isInteger(payload.total) && payload.total >= 0
+        || payload.total === null && Number.isInteger(payload.total_lower_bound)
+          && payload.total_lower_bound >= 0)
       && (!("total_lower_bound" in payload)
         || Number.isInteger(payload.total_lower_bound) && payload.total_lower_bound >= 0)
       && (!("truncated" in payload) || typeof payload.truncated === "boolean")
