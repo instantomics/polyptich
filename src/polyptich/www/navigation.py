@@ -270,8 +270,12 @@ def _validate_collection(value, node_id, source, *, base_dir, mount_url):
     if not isinstance(value, dict) or not set(value).issubset(_COLLECTION_KEYS):
         raise ValueError(f"Navigation collection {node_id!r} in {source} is malformed")
     collection_type = value.get("type")
-    placeholder = value.get("placeholder", "Search")
-    if not isinstance(placeholder, str) or not placeholder.strip() or len(placeholder) > 200:
+    placeholder = value.get("placeholder")
+    if placeholder is not None and (
+        not isinstance(placeholder, str)
+        or not placeholder.strip()
+        or len(placeholder) > 200
+    ):
         raise ValueError(f"Navigation collection {node_id!r} has an invalid placeholder")
     if collection_type == "directory":
         if mount_url is not None or set(value) - {"type", "path", "placeholder", "favorites"}:
@@ -292,12 +296,14 @@ def _validate_collection(value, node_id, source, *, base_dir, mount_url):
         target = (base_dir / path_value).resolve()
         if target != base_dir and base_dir not in target.parents:
             raise ValueError(f"Navigation collection {node_id!r} escapes www")
-        return {
+        collection = {
             "type": "directory",
             "path": path_value,
-            "placeholder": placeholder.strip(),
             "favorites": favorites,
         }
+        if placeholder is not None:
+            collection["placeholder"] = placeholder.strip()
+        return collection
     if collection_type == "endpoint":
         if set(value) - {"type", "href", "placeholder"}:
             raise ValueError(f"Navigation collection {node_id!r} has invalid endpoint options")
@@ -306,11 +312,13 @@ def _validate_collection(value, node_id, source, *, base_dir, mount_url):
             raise ValueError(
                 f"Navigation collection {node_id!r} must use a local endpoint href"
             )
-        return {
+        collection = {
             "type": "endpoint",
             "href": href,
-            "placeholder": placeholder.strip(),
         }
+        if placeholder is not None:
+            collection["placeholder"] = placeholder.strip()
+        return collection
     raise ValueError(f"Navigation collection {node_id!r} has an invalid type")
 
 
@@ -376,8 +384,9 @@ def _serialize_node(node, *, can_access, collection_href, script_root):
         result["collection"] = {
             "type": collection["type"],
             "href": href,
-            "placeholder": collection["placeholder"],
         }
+        if "placeholder" in collection:
+            result["collection"]["placeholder"] = collection["placeholder"]
     return result
 
 

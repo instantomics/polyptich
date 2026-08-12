@@ -6,15 +6,48 @@
 
   const listRoot = shell.querySelector("[data-pt-navigation-list]");
   const title = shell.querySelector("[data-pt-navigation-title]");
-  const toc = shell.querySelector("[data-pt-navigation-toc]");
   const toggle = shell.querySelector(".pt-global-navigation__toggle");
   const overlay = shell.querySelector(".pt-global-navigation__overlay");
   const sidebar = shell.querySelector(".pt-global-navigation__sidebar");
+  let mobileControls = shell.querySelector(".pt-global-navigation__mobile-controls");
+  if (!mobileControls) {
+    mobileControls = document.createElement("div");
+    mobileControls.className = "pt-global-navigation__mobile-controls";
+    toggle.before(mobileControls);
+    mobileControls.append(toggle);
+  }
+  let tocToggle = shell.querySelector(".pt-global-navigation__toc-toggle");
+  if (!tocToggle) {
+    tocToggle = document.createElement("button");
+    tocToggle.className = "pt-global-navigation__toc-toggle";
+    tocToggle.type = "button";
+    tocToggle.setAttribute("aria-controls", "pt-global-navigation-toc-sidebar");
+    tocToggle.setAttribute("aria-expanded", "false");
+    tocToggle.textContent = "On this page";
+    tocToggle.hidden = true;
+    mobileControls.append(tocToggle);
+  }
+  let toc = shell.querySelector("[data-pt-navigation-toc]");
+  if (!toc) {
+    toc = document.createElement("nav");
+    toc.className = "pt-global-navigation__toc";
+    toc.setAttribute("data-pt-navigation-toc", "");
+  }
+  let tocSidebar = shell.querySelector(".pt-global-navigation__toc-sidebar");
+  if (!tocSidebar) {
+    tocSidebar = document.createElement("aside");
+    tocSidebar.id = "pt-global-navigation-toc-sidebar";
+    tocSidebar.className = "pt-global-navigation__toc-sidebar";
+    tocSidebar.setAttribute("aria-label", "On this page");
+    tocSidebar.hidden = true;
+    sidebar.after(tocSidebar);
+  }
+  tocSidebar.append(toc);
   let body = shell.querySelector(".pt-global-navigation__body");
   if (!body) {
     body = document.createElement("div");
     body.className = "pt-global-navigation__body";
-    body.append(title, listRoot, toc);
+    body.append(title, listRoot);
     sidebar.prepend(body);
   }
   let actionsRoot = shell.querySelector("[data-pt-navigation-actions]");
@@ -35,6 +68,7 @@
   }
   let controlIndex = 0;
   let returnFocus = null;
+  let openDrawerName = null;
   let preferredNavigationAvailable = false;
   let navigationItems = [];
   let pageController = null;
@@ -114,37 +148,50 @@
     }
   };
 
-  const openDrawer = () => {
+  const openDrawer = (name) => {
     returnFocus = document.activeElement;
-    shell.classList.add("pt-global-navigation--open");
-    toggle.setAttribute("aria-expanded", "true");
-    sidebar.setAttribute("aria-modal", "true");
-    sidebar.setAttribute("role", "dialog");
-    const focusable = sidebar.querySelector("a, button, input");
+    openDrawerName = name;
+    shell.classList.toggle("pt-global-navigation--navigation-open", name === "navigation");
+    shell.classList.toggle("pt-global-navigation--toc-open", name === "toc");
+    toggle.setAttribute("aria-expanded", String(name === "navigation"));
+    tocToggle.setAttribute("aria-expanded", String(name === "toc"));
+    const drawer = name === "toc" ? tocSidebar : sidebar;
+    drawer.setAttribute("aria-modal", "true");
+    drawer.setAttribute("role", "dialog");
+    const focusable = drawer.querySelector("a, button, input");
     if (focusable) focusable.focus();
   };
 
   const closeDrawer = () => {
-    shell.classList.remove("pt-global-navigation--open");
+    shell.classList.remove("pt-global-navigation--navigation-open", "pt-global-navigation--toc-open");
     toggle.setAttribute("aria-expanded", "false");
+    tocToggle.setAttribute("aria-expanded", "false");
     sidebar.removeAttribute("aria-modal");
     sidebar.removeAttribute("role");
+    tocSidebar.removeAttribute("aria-modal");
+    tocSidebar.removeAttribute("role");
+    openDrawerName = null;
     if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus();
     else toggle.focus();
   };
 
   toggle.addEventListener("click", () => {
-    if (shell.classList.contains("pt-global-navigation--open")) closeDrawer();
-    else openDrawer();
+    if (openDrawerName === "navigation") closeDrawer();
+    else openDrawer("navigation");
+  });
+  tocToggle.addEventListener("click", () => {
+    if (openDrawerName === "toc") closeDrawer();
+    else openDrawer("toc");
   });
   overlay.addEventListener("click", closeDrawer);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && shell.classList.contains("pt-global-navigation--open")) {
+    if (event.key === "Escape" && openDrawerName) {
       event.preventDefault();
       closeDrawer();
     }
-    if (event.key !== "Tab" || !shell.classList.contains("pt-global-navigation--open")) return;
-    const focusable = [...sidebar.querySelectorAll("a[href], button:not([disabled]), input:not([disabled])")];
+    if (event.key !== "Tab" || !openDrawerName) return;
+    const drawer = openDrawerName === "toc" ? tocSidebar : sidebar;
+    const focusable = [...drawer.querySelectorAll("a[href], button:not([disabled]), input:not([disabled])")];
     if (!focusable.length) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -171,9 +218,11 @@
     && Object.keys(value).every((key) => ["type", "href", "placeholder"].includes(key))
     && ["directory", "endpoint"].includes(value.type)
     && isLocalUrl(value.href)
-    && typeof value.placeholder === "string"
-    && value.placeholder.length > 0
-    && value.placeholder.length <= 200;
+    && (!("placeholder" in value) || (
+      typeof value.placeholder === "string"
+      && value.placeholder.length > 0
+      && value.placeholder.length <= 200
+    ));
 
   const validateNavigationNode = (item, depth = 0) => {
     if (!item || typeof item !== "object" || depth > 32) return false;
@@ -198,12 +247,16 @@
     if (!payload || payload.schema !== "polyptich.www.navigation.collection" || payload.schema_version !== 1) return false;
     if (!Object.keys(payload).every((key) => [
       "schema", "schema_version", "items", "favorites", "page", "page_size", "has_more", "total",
+      "total_lower_bound", "truncated",
     ].includes(key))) return false;
     if (!Array.isArray(payload.items) || !payload.items.every((item) => validateNavigationNode(item))) return false;
     if (!Array.isArray(payload.favorites) || !payload.favorites.every((item) => validateNavigationNode(item))) return false;
     return Number.isInteger(payload.page) && payload.page > 0
       && Number.isInteger(payload.page_size) && payload.page_size > 0
-      && Number.isInteger(payload.total) && payload.total >= 0
+      && (payload.total === null || Number.isInteger(payload.total) && payload.total >= 0)
+      && (!("total_lower_bound" in payload)
+        || Number.isInteger(payload.total_lower_bound) && payload.total_lower_bound >= 0)
+      && (!("truncated" in payload) || typeof payload.truncated === "boolean")
       && typeof payload.has_more === "boolean";
   };
 
@@ -237,15 +290,19 @@
     favoriteTitle.textContent = "Favorites";
     favoriteTitle.hidden = true;
     const favorites = document.createElement("ul");
-    const label = document.createElement("label");
-    label.className = "pt-global-navigation__collection-label";
-    const inputId = `pt-global-navigation-search-${++controlIndex}`;
-    label.htmlFor = inputId;
-    label.textContent = config.placeholder || "Search";
-    const input = document.createElement("input");
-    input.id = inputId;
-    input.type = "search";
-    input.placeholder = config.placeholder || "Search";
+    let label = null;
+    let input = null;
+    if (config.placeholder) {
+      label = document.createElement("label");
+      label.className = "pt-global-navigation__collection-label";
+      const inputId = `pt-global-navigation-search-${++controlIndex}`;
+      label.htmlFor = inputId;
+      label.textContent = config.placeholder;
+      input = document.createElement("input");
+      input.id = inputId;
+      input.type = "search";
+      input.placeholder = config.placeholder;
+    }
     const results = document.createElement("ul");
     const toolbar = document.createElement("div");
     toolbar.className = "pt-global-navigation__collection-toolbar";
@@ -263,7 +320,14 @@
     refresh.textContent = "Refresh";
     toolbar.append(previous, pageStatus, next, refresh);
     toolbar.hidden = true;
-    host.replaceChildren(favoriteTitle, favorites, label, input, results, toolbar, status);
+    host.replaceChildren(
+      favoriteTitle,
+      favorites,
+      ...(label && input ? [label, input] : []),
+      results,
+      toolbar,
+      status,
+    );
 
     const requestPage = async (requestedPage) => {
       if (controller) controller.abort();
@@ -271,7 +335,7 @@
       controller = activeController;
       ready = false;
       const url = new URL(config.href, window.location.href);
-      url.searchParams.set("q", query);
+      if (config.placeholder) url.searchParams.set("q", query);
       url.searchParams.set("page", String(requestedPage));
       url.searchParams.set("page_size", String(pageSize));
       status.textContent = "Loading…";
@@ -291,13 +355,16 @@
         results.replaceChildren(...renderNodes(payload.items, 1).children);
         page = payload.page;
         total = payload.total;
-        const pages = Math.max(1, Math.ceil(total / payload.page_size));
+        const pages = Number.isInteger(total) ? Math.max(1, Math.ceil(total / payload.page_size)) : null;
         toolbar.hidden = false;
         previous.disabled = page <= 1;
         next.disabled = !payload.has_more;
         refresh.disabled = false;
-        pageStatus.textContent = `Page ${page} of ${pages}`;
-        status.textContent = payload.items.length ? `${total} item${total === 1 ? "" : "s"}` : "No matching pages";
+        pageStatus.textContent = pages === null ? `Page ${page}` : `Page ${page} of ${pages}`;
+        const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
+        status.textContent = payload.items.length
+          ? `${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`
+          : "No matching pages";
         ready = true;
       } catch (error) {
         if (controller === activeController && error.name !== "AbortError") {
@@ -316,13 +383,15 @@
     };
     host._ptEnsureCollectionLoaded = ensureLoaded;
 
-    input.addEventListener("input", () => {
-      window.clearTimeout(debounce);
-      debounce = window.setTimeout(() => {
-        query = input.value.trim();
-        requestPage(1);
-      }, 250);
-    });
+    if (input) {
+      input.addEventListener("input", () => {
+        window.clearTimeout(debounce);
+        debounce = window.setTimeout(() => {
+          query = input.value.trim();
+          requestPage(1);
+        }, 250);
+      });
+    }
     previous.addEventListener("click", () => requestPage(Math.max(1, page - 1)));
     next.addEventListener("click", () => requestPage(page + 1));
     refresh.addEventListener("click", () => requestPage(page));
@@ -359,7 +428,19 @@
         row.append(spacer);
       }
       const icon = makeIcon(item.icon);
-      if (icon) row.append(icon);
+      if (icon) {
+        if (expandable) {
+          const iconToggle = document.createElement("button");
+          iconToggle.className = "pt-global-navigation__icon-toggle";
+          iconToggle.type = "button";
+          iconToggle.setAttribute("aria-label", `Expand ${item.label}`);
+          iconToggle.append(icon);
+          row.append(iconToggle);
+          icon._ptToggle = iconToggle;
+        } else {
+          row.append(icon);
+        }
+      }
       let destination = null;
       if (item.href) {
         destination = document.createElement("a");
@@ -388,10 +469,17 @@
         const setExpanded = (expanded) => {
           disclosure.setAttribute("aria-expanded", String(expanded));
           disclosure.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${item.label}`);
+          if (icon?._ptToggle) {
+            icon._ptToggle.setAttribute("aria-expanded", String(expanded));
+            icon._ptToggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${item.label}`);
+          }
           panel.hidden = !expanded;
           if (expanded && collection) renderCollection(collection, item.collection);
         };
         disclosure.addEventListener("click", () => setExpanded(disclosure.getAttribute("aria-expanded") !== "true"));
+        if (icon?._ptToggle) {
+          icon._ptToggle.addEventListener("click", () => setExpanded(disclosure.getAttribute("aria-expanded") !== "true"));
+        }
         if (destination.getAttribute && destination.getAttribute("aria-current") === "page") {
           setExpanded(true);
         }
@@ -406,6 +494,9 @@
   const renderToc = () => {
     toc.replaceChildren();
     toc.hidden = true;
+    tocSidebar.hidden = true;
+    tocToggle.hidden = true;
+    document.body.removeAttribute("data-polyptich-toc-visible");
     if (pageContext.toc === false) return;
     const headings = [...document.querySelectorAll("h2, h3")].filter((heading) => !heading.closest("#pt-global-navigation-shell"));
     const entries = headings.map((heading) => {
@@ -432,6 +523,9 @@
     });
     toc.replaceChildren(heading, ul);
     toc.hidden = false;
+    tocSidebar.hidden = false;
+    tocToggle.hidden = false;
+    document.body.setAttribute("data-polyptich-toc-visible", "");
   };
 
   const pageState = (url, scrollX = window.scrollX, scrollY = window.scrollY) => ({
@@ -471,6 +565,23 @@
       if (attribute.name === "src" || attribute.name === "href") value = new URL(value, baseUrl).href;
       target.setAttribute(attribute.name, value);
     }
+  };
+
+  const resolveMainUrls = (main, baseUrl) => {
+    const attributes = ["src", "href", "poster"];
+    main.querySelectorAll("[src], [href], [poster], [srcset]").forEach((element) => {
+      for (const attribute of attributes) {
+        const value = element.getAttribute(attribute);
+        if (value) element.setAttribute(attribute, new URL(value, baseUrl).href);
+      }
+      const srcset = element.getAttribute("srcset");
+      if (srcset) {
+        element.setAttribute("srcset", srcset.split(",").map((candidate) => {
+          const match = candidate.trim().match(/^(\S+)(\s+.*)?$/);
+          return match ? `${new URL(match[1], baseUrl).href}${match[2] || ""}` : candidate;
+        }).join(", "));
+      }
+    });
   };
 
   const parsePage = (html, responseUrl) => {
@@ -620,6 +731,7 @@
     try {
       window.dispatchEvent(new CustomEvent("polyptich:before-page-swap", {detail: {url: page.responseUrl}}));
       const importedMain = document.importNode(page.main, true);
+      resolveMainUrls(importedMain, page.responseUrl);
       importedMain.querySelectorAll("script[src]").forEach((script) => script.remove());
       const importedContext = document.importNode(page.contextElement, true);
       oldMain.replaceWith(importedMain);
@@ -646,7 +758,7 @@
       else if (historyMode === "replace") history.replaceState(pageState(finalUrl, 0, 0), "", finalUrl);
       applyActiveNavigation();
       renderToc();
-      if (shell.classList.contains("pt-global-navigation--open")) closeDrawer();
+      if (openDrawerName) closeDrawer();
       restorePosition(finalUrl, scrollPosition);
       if (!scrollPosition && !finalUrl.hash) importedMain.focus({preventScroll: true});
       await executeScripts(page);

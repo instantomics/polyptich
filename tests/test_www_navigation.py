@@ -41,6 +41,9 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     assert 'src="/static/polyptich-navigation.js"' in document
     assert 'data-navigation-url="/api/v1/navigation"' in document
     assert '"navigation_id":"tasks"' in document
+    assert 'id="pt-global-navigation-sidebar"' in document
+    assert 'id="pt-global-navigation-toc-sidebar"' in document
+    assert 'class="pt-global-navigation__toc-toggle"' in document
 
     styled = render_workspace_document(
         "Styled", "content", stylesheets=("/page.css",), head_html="<style>main { color: red; }</style>"
@@ -182,6 +185,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     assert alpha["icon"] == "folder"
     assert alpha["href"].endswith("/files/tasks/alpha/")
     nested = client.get(alpha["collection"]["href"], headers=auth()).get_json()
+    assert "placeholder" not in alpha["collection"]
     evidence_item = nested["items"][0]
     assert evidence_item["label"] == "evidence"
     assert evidence_item["type"] == "collection"
@@ -254,3 +258,64 @@ def test_global_endpoint_collection_must_target_registered_endpoint(tmp_path):
 
     with pytest.raises(ValueError, match="registered endpoint"):
         create_app(tmp_path, access_verifier=FakeVerifier())
+
+
+def test_collection_search_is_enabled_only_by_an_explicit_placeholder(tmp_path):
+    www = tmp_path / "www"
+    www.mkdir()
+    (www / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [
+                    {
+                        "id": "plain",
+                        "label": "Plain",
+                        "type": "collection",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "/endpoint/reports/api/navigation",
+                        },
+                    },
+                    {
+                        "id": "searchable",
+                        "label": "Searchable",
+                        "type": "collection",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "/endpoint/reports/api/searchable",
+                            "placeholder": "Find a report",
+                        },
+                    },
+                ],
+            }
+        )
+    )
+    write_manifest(
+        www / "reports",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.navigation",
+        },
+    )
+
+    class Endpoint:
+        def __init__(self, **_kwargs):
+            pass
+
+        def register(self, _app, **_kwargs):
+            pass
+
+    app = create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        endpoint_factories={"tests.navigation": Endpoint},
+    )
+
+    items = app.test_client().get("/api/v1/navigation", headers=auth()).get_json()["items"]
+
+    assert "placeholder" not in items[0]["collection"]
+    assert items[1]["collection"]["placeholder"] == "Find a report"

@@ -727,7 +727,6 @@ def _directory_navigation_item(
                 node_id=collection_id,
                 subpath=child_subpath,
             ),
-            "placeholder": f"Search {path.name}",
         }
     return item
 

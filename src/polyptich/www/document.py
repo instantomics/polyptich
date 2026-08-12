@@ -68,11 +68,16 @@ def render_workspace_document(
   <a class="pt-global-navigation__skip" href="#pt-global-navigation-main">Skip to content</a>
   <div id="pt-global-navigation-shell" data-polyptich-navigation-shell
        data-navigation-url="{escape(navigation_url, quote=True)}">
-    <button class="pt-global-navigation__toggle" type="button"
-            aria-controls="pt-global-navigation-sidebar"
-            aria-expanded="false">Navigation</button>
+    <div class="pt-global-navigation__mobile-controls">
+      <button class="pt-global-navigation__toggle" type="button"
+              aria-controls="pt-global-navigation-sidebar"
+              aria-expanded="false">Navigation</button>
+      <button class="pt-global-navigation__toc-toggle" type="button"
+              aria-controls="pt-global-navigation-toc-sidebar"
+              aria-expanded="false" hidden>On this page</button>
+    </div>
     <button class="pt-global-navigation__overlay" type="button"
-            aria-label="Close navigation" tabindex="-1"></button>
+             aria-label="Close navigation" tabindex="-1"></button>
     <aside id="pt-global-navigation-sidebar" class="pt-global-navigation__sidebar"
            aria-label="Global navigation">
       <div class="pt-global-navigation__body">
@@ -80,11 +85,13 @@ def render_workspace_document(
         <nav class="pt-global-navigation__nav" aria-label="Site" data-pt-navigation-list>
           <p class="pt-global-navigation__status">Loading navigation…</p>
         </nav>
-        <nav class="pt-global-navigation__toc" aria-label="On this page"
-             data-pt-navigation-toc hidden></nav>
       </div>
       <div class="pt-global-navigation__actions" aria-label="Workspace actions"
            data-pt-navigation-actions hidden></div>
+    </aside>
+    <aside id="pt-global-navigation-toc-sidebar" class="pt-global-navigation__toc-sidebar"
+           aria-label="On this page" hidden>
+      <nav class="pt-global-navigation__toc" data-pt-navigation-toc></nav>
     </aside>
   </div>
   <script id="pt-global-navigation-context" type="application/json">{context}</script>
