@@ -113,6 +113,9 @@
     item.id === id || (Array.isArray(item.children) && containsNavigationId(item.children, id))
   );
 
+  const containsCurrentNavigation = (item) => pageContext.navigation_id === item.id
+    || pageContext.navigation_id?.startsWith(`${item.id}.`);
+
   const markActive = (anchor, item) => {
     if (pageContext.navigation_id && item.id === pageContext.navigation_id) {
       shell.querySelectorAll('[aria-current="page"]').forEach((current) => current.removeAttribute("aria-current"));
@@ -310,17 +313,23 @@
     toolbar.className = "pt-global-navigation__collection-toolbar";
     const previous = document.createElement("button");
     previous.type = "button";
-    previous.textContent = "Previous";
+    previous.setAttribute("aria-label", "Previous page");
+    previous.title = "Previous page";
+    previous.textContent = "←";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "pt-global-navigation__refresh";
+    refresh.setAttribute("aria-label", "Refresh page");
+    refresh.title = "Refresh page";
+    refresh.textContent = "↻";
     const pageStatus = document.createElement("span");
     pageStatus.className = "pt-global-navigation__page-status";
     const next = document.createElement("button");
     next.type = "button";
-    next.textContent = "Next";
-    const refresh = document.createElement("button");
-    refresh.type = "button";
-    refresh.className = "pt-global-navigation__refresh";
-    refresh.textContent = "Refresh";
-    toolbar.append(previous, pageStatus, next, refresh);
+    next.setAttribute("aria-label", "Next page");
+    next.title = "Next page";
+    next.textContent = "→";
+    toolbar.append(previous, refresh, pageStatus, next);
     toolbar.hidden = true;
     host.replaceChildren(
       favoriteTitle,
@@ -362,7 +371,8 @@
         previous.disabled = page <= 1;
         next.disabled = !payload.has_more;
         refresh.disabled = false;
-        pageStatus.textContent = pages === null ? `Page ${page}` : `Page ${page} of ${pages}`;
+        pageStatus.textContent = `${page} / ${pages ?? "?"}`;
+        pageStatus.setAttribute("aria-label", pages === null ? `Page ${page}` : `Page ${page} of ${pages}`);
         const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
         status.textContent = payload.items.length
           ? `${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`
@@ -486,6 +496,7 @@
           setExpanded(true);
         }
         if (panel.querySelector('[aria-current="page"]')) setExpanded(true);
+        if (containsCurrentNavigation(item)) setExpanded(true);
         li.append(panel);
       }
       ul.append(li);

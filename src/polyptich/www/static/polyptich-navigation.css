@@ -258,7 +258,7 @@
 
 #pt-global-navigation-shell .pt-global-navigation__collection-toolbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 0.25rem;
   align-items: center;
   margin-top: 0.35rem;
@@ -287,8 +287,6 @@
 }
 
 #pt-global-navigation-shell .pt-global-navigation__collection-toolbar .pt-global-navigation__refresh {
-  grid-column: 1 / -1;
-  width: 100%;
   color: var(--pt-nav-muted);
 }
 
