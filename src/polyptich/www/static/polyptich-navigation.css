@@ -236,13 +236,18 @@
   padding: 0.3rem 0 0.5rem 0.16rem;
 }
 
-#pt-global-navigation-shell .pt-global-navigation__collection-label,
-#pt-global-navigation-shell .pt-global-navigation__collection-title {
+#pt-global-navigation-shell .pt-global-navigation__collection-label {
   display: block;
   margin: 0.35rem 0 0.2rem;
   color: var(--pt-nav-muted);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__favorites:not(:empty) {
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #edf0f4;
 }
 
 #pt-global-navigation-shell .pt-global-navigation__collection input {

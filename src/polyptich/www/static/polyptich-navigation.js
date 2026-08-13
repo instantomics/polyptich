@@ -159,6 +159,9 @@
     toggle.setAttribute("aria-expanded", String(name === "navigation"));
     tocToggle.setAttribute("aria-expanded", String(name === "toc"));
     const drawer = name === "toc" ? tocSidebar : sidebar;
+    const inactiveDrawer = name === "toc" ? sidebar : tocSidebar;
+    inactiveDrawer.removeAttribute("aria-modal");
+    inactiveDrawer.removeAttribute("role");
     drawer.setAttribute("aria-modal", "true");
     drawer.setAttribute("role", "dialog");
     const focusable = drawer.querySelector("a, button, input");
@@ -286,15 +289,27 @@
     let ready = false;
     let total = 0;
     const pageSize = 20;
+    const favoriteStorageKey = `polyptichNavigationFavorites:${new URL(config.href, window.location.href).pathname}`;
+    let favoriteOverrides = {};
+    let currentPayload = null;
+    let pendingNavigation = null;
+
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(favoriteStorageKey) || "{}");
+      if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+        favoriteOverrides = Object.fromEntries(
+          Object.entries(stored).filter(([id, value]) => typeof id === "string" && typeof value === "boolean"),
+        );
+      }
+    } catch (_error) {
+      favoriteOverrides = {};
+    }
 
     const status = document.createElement("p");
     status.className = "pt-global-navigation__status";
     status.textContent = "Loading…";
-    const favoriteTitle = document.createElement("span");
-    favoriteTitle.className = "pt-global-navigation__collection-title";
-    favoriteTitle.textContent = "Favorites";
-    favoriteTitle.hidden = true;
     const favorites = document.createElement("ul");
+    favorites.className = "pt-global-navigation__favorites";
     let label = null;
     let input = null;
     if (config.placeholder) {
@@ -332,13 +347,72 @@
     toolbar.append(previous, refresh, pageStatus, next);
     toolbar.hidden = true;
     host.replaceChildren(
-      favoriteTitle,
       favorites,
       ...(label && input ? [label, input] : []),
       results,
       toolbar,
       status,
     );
+
+    const isFavorite = (item) => Object.prototype.hasOwnProperty.call(favoriteOverrides, item.id)
+      ? favoriteOverrides[item.id]
+      : Boolean(item.favorite);
+
+    const renderPayload = (payload) => {
+      const allItems = [...payload.favorites, ...payload.items];
+      const serverFavoriteIds = new Set(payload.favorites.map((item) => item.id));
+      const favoriteItems = allItems
+        .filter((item) => isFavorite(item))
+        .map((item) => ({...item, favorite: true}));
+      const ordinaryItems = allItems
+        .filter((item) => !isFavorite(item))
+        .filter((item) => !serverFavoriteIds.has(item.id) || !query || item.label.toLowerCase().includes(query.toLowerCase()))
+        .map((item) => ({...item, favorite: false}));
+      favorites.replaceChildren(...renderNodes(favoriteItems, 1).children);
+      results.replaceChildren(...renderNodes(ordinaryItems, 1).children);
+      host.querySelectorAll("a.pt-global-navigation__link").forEach((link) => {
+        link.title = "Double-click to add or remove a favorite";
+      });
+      return ordinaryItems;
+    };
+
+    const toggleFavorite = (id) => {
+      if (!currentPayload) return;
+      const item = [...currentPayload.favorites, ...currentPayload.items].find((candidate) => candidate.id === id);
+      if (!item) return;
+      const nextValue = !isFavorite(item);
+      if (nextValue === Boolean(item.favorite)) delete favoriteOverrides[id];
+      else favoriteOverrides[id] = nextValue;
+      try {
+        window.localStorage.setItem(favoriteStorageKey, JSON.stringify(favoriteOverrides));
+      } catch (_error) {
+        // The preference still applies for this page even when storage is unavailable.
+      }
+      renderPayload(currentPayload);
+    };
+
+    host.addEventListener("click", (event) => {
+      const link = event.target.closest?.("a.pt-global-navigation__link");
+      if (!link || !host.contains(link) || event.detail === 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (pendingNavigation) {
+        window.clearTimeout(pendingNavigation.timer);
+        const previous = pendingNavigation.link;
+        pendingNavigation = null;
+        event.preventDefault();
+        if (previous === link) {
+          toggleFavorite(link.dataset.navigationId);
+          return;
+        }
+        window.polyptichNavigate(previous.href);
+      }
+      event.preventDefault();
+      const timer = window.setTimeout(() => {
+        if (!pendingNavigation || pendingNavigation.link !== link) return;
+        pendingNavigation = null;
+        window.polyptichNavigate(link.href);
+      }, 250);
+      pendingNavigation = {link, timer};
+    });
 
     const requestPage = async (requestedPage) => {
       if (controller) controller.abort();
@@ -361,9 +435,8 @@
           throw new Error("Navigation collection returned an invalid response");
         }
         if (controller !== activeController) return;
-        favorites.replaceChildren(...renderNodes(payload.favorites, 1).children);
-        favoriteTitle.hidden = payload.favorites.length === 0;
-        results.replaceChildren(...renderNodes(payload.items, 1).children);
+        currentPayload = payload;
+        const ordinaryItems = renderPayload(payload);
         page = payload.page;
         total = payload.total;
         const pages = Number.isInteger(total) ? Math.max(1, Math.ceil(total / payload.page_size)) : null;
@@ -374,7 +447,7 @@
         pageStatus.textContent = `${page} / ${pages ?? "?"}`;
         pageStatus.setAttribute("aria-label", pages === null ? `Page ${page}` : `Page ${page} of ${pages}`);
         const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
-        status.textContent = payload.items.length
+        status.textContent = ordinaryItems.length
           ? `${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`
           : "No matching pages";
         ready = true;
