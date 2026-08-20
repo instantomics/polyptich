@@ -94,7 +94,13 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
 
     assert client.get("/healthz").get_json() == {"status": "ok"}
     assert client.get("/readyz").get_json() == {"status": "ready"}
-    for path in ["/", "/files/public.txt", "/static/polyptich-www.css"]:
+    for path in [
+        "/",
+        "/files/public.txt",
+        "/static/bootstrap-5.3.8.min.css",
+        "/static/bootstrap-5.3.8.bundle.min.js",
+        "/static/polyptich-www.css",
+    ]:
         assert client.get(path).status_code == 401
 
     regular = auth("reader@example.test")

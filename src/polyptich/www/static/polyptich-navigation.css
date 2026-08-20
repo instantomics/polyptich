@@ -4,15 +4,15 @@
 }
 
 #pt-global-navigation-shell {
-  --pt-nav-width: 18rem;
+  --pt-nav-width: 18.5rem;
   --pt-toc-width: 15rem;
-  --pt-nav-border: #d9dee8;
-  --pt-nav-muted: #667085;
-  --pt-nav-text: #182230;
-  --pt-nav-link: #234ea5;
-  --pt-nav-surface: #fff;
+  --pt-nav-border: var(--bs-border-color);
+  --pt-nav-muted: var(--bs-secondary-color);
+  --pt-nav-text: var(--bs-body-color);
+  --pt-nav-link: var(--bs-primary);
+  --pt-nav-surface: var(--bs-body-bg);
   color: var(--pt-nav-text);
-  font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 14px/1.4 var(--bs-body-font-family);
 }
 
 #pt-global-navigation-shell::after {
@@ -62,7 +62,7 @@
   overflow: hidden;
   border-right: 1px solid var(--pt-nav-border);
   background: var(--pt-nav-surface);
-  box-shadow: 1px 0 4px rgb(16 24 40 / 8%);
+  box-shadow: var(--bs-box-shadow-sm);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__toc-sidebar {
@@ -74,7 +74,7 @@
   overflow: auto;
   border-left: 1px solid var(--pt-nav-border);
   background: var(--pt-nav-surface);
-  box-shadow: -1px 0 4px rgb(16 24 40 / 8%);
+  box-shadow: var(--bs-box-shadow-sm);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__toc-sidebar[hidden] {
@@ -90,7 +90,7 @@
 #pt-global-navigation-shell .pt-global-navigation__heading {
   margin: 0 0.25rem 0.85rem;
   font-size: 1.05rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 #pt-global-navigation-shell .pt-global-navigation__mobile-controls,
@@ -108,7 +108,7 @@
 #pt-global-navigation-shell .pt-global-navigation__nav ul ul {
   margin-left: 0.14rem;
   padding-left: 0.3rem;
-  border-left: 1px solid #edf0f4;
+  border-left: 1px solid var(--bs-border-color-translucent);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__row {
@@ -203,7 +203,7 @@
   min-width: 0;
   flex: 1 1 auto;
   padding: 0.32rem 0.4rem;
-  border-radius: 0.35rem;
+  border-radius: var(--bs-border-radius);
   color: var(--pt-nav-text);
   overflow-wrap: anywhere;
   text-decoration: none;
@@ -211,14 +211,15 @@
 
 #pt-global-navigation-shell .pt-global-navigation__link:hover,
 #pt-global-navigation-shell .pt-global-navigation__toc a:hover {
-  background: #eef4ff;
+  background: var(--bs-tertiary-bg);
   color: var(--pt-nav-link);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__link[aria-current="page"] {
-  background: #e5edff;
-  color: #173f90;
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary-text-emphasis);
   font-weight: 750;
+  box-shadow: inset 3px 0 0 var(--bs-primary);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__label {
@@ -247,16 +248,16 @@
 #pt-global-navigation-shell .pt-global-navigation__favorites:not(:empty) {
   margin-bottom: 0.45rem;
   padding-bottom: 0.45rem;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--bs-border-color-translucent);
 }
 
 #pt-global-navigation-shell .pt-global-navigation__collection input {
   width: 100%;
   min-width: 0;
   padding: 0.42rem 0.5rem;
-  border: 1px solid #cfd5df;
-  border-radius: 0.4rem;
-  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-body-bg);
   color: var(--pt-nav-text);
   font: inherit;
 }
@@ -271,9 +272,9 @@
 
 #pt-global-navigation-shell .pt-global-navigation__collection-toolbar button {
   padding: 0.38rem 0.5rem;
-  border: 1px solid #cfd5df;
-  border-radius: 0.4rem;
-  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-body-bg);
   color: var(--pt-nav-link);
   cursor: pointer;
   font: inherit;
@@ -401,7 +402,7 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
 
 @media (min-width: 64.001rem) {
   body[data-polyptich-navigation-host] {
-    margin-left: 18rem !important;
+    margin-left: 18.5rem !important;
   }
 
   body[data-polyptich-navigation-host][data-polyptich-toc-visible] {
@@ -423,11 +424,11 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
   #pt-global-navigation-shell .pt-global-navigation__toc-toggle {
     display: block;
     padding: 0.5rem 0.7rem;
-    border: 1px solid #cfd5df;
-    border-radius: 0.45rem;
-    background: #fff;
-    color: #182230;
-    box-shadow: 0 2px 8px rgb(16 24 40 / 14%);
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    box-shadow: var(--bs-box-shadow);
     cursor: pointer;
     font: 700 14px/1.2 ui-sans-serif, system-ui, sans-serif;
   }

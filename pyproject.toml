@@ -54,7 +54,7 @@ www = [
 ]
 
 [tool.setuptools.package-data]
-"polyptich.www" = ["templates/*.html", "static/*.css", "static/*.js"]
+"polyptich.www" = ["templates/*.html", "static/*.css", "static/*.js", "static/*.txt"]
 
 [tool.setuptools_scm]
 

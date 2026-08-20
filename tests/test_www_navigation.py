@@ -36,19 +36,31 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     )
     assert document.count("data-polyptich-navigation-shell") == 1
     assert 'data-polyptich-page-version="1"' in document
-    assert document.count("data-polyptich-navigation-persistent") == 2
+    assert document.count("data-polyptich-navigation-persistent") == 5
+    assert 'href="/static/bootstrap-5.3.8.min.css"' in document
+    assert 'href="/static/polyptich-ui.css"' in document
     assert 'href="/static/polyptich-navigation.css"' in document
+    assert document.index("bootstrap-5.3.8.min.css") < document.index("polyptich-ui.css")
+    assert document.index("polyptich-ui.css") < document.index("polyptich-navigation.css")
+    assert 'src="/static/bootstrap-5.3.8.bundle.min.js"' in document
     assert 'src="/static/polyptich-navigation.js"' in document
     assert 'data-navigation-url="/api/v1/navigation"' in document
     assert '"navigation_id":"tasks"' in document
     assert 'id="pt-global-navigation-sidebar"' in document
     assert 'id="pt-global-navigation-toc-sidebar"' in document
-    assert 'class="pt-global-navigation__toc-toggle"' in document
+    assert 'class="pt-global-navigation__toc-toggle btn btn-light"' in document
 
     styled = render_workspace_document(
         "Styled", "content", stylesheets=("/page.css",), head_html="<style>main { color: red; }</style>"
     )
     assert 'href="/page.css" data-polyptich-page-resource' in styled
+    deduplicated = render_workspace_document(
+        "Deduplicated",
+        "content",
+        stylesheets=("/static/polyptich-ui.css", "/page.css", "/page.css"),
+    )
+    assert deduplicated.count('href="/static/polyptich-ui.css"') == 1
+    assert deduplicated.count('href="/page.css"') == 1
 
     docs = tmp_path / "www" / "docs"
     docs.mkdir(parents=True)
@@ -81,6 +93,8 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
         environ_overrides={"SCRIPT_NAME": "/gateway"},
     )
     assert b'href="/gateway/static/polyptich-navigation.css"' in prefixed.data
+    assert b'href="/gateway/static/bootstrap-5.3.8.min.css"' in prefixed.data
+    assert b'src="/gateway/static/bootstrap-5.3.8.bundle.min.js"' in prefixed.data
     assert b'data-navigation-url="/gateway/api/v1/navigation"' in prefixed.data
 
 
