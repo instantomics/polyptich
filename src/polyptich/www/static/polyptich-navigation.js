@@ -59,6 +59,19 @@
     actionsRoot.hidden = true;
     sidebar.append(actionsRoot);
   }
+  const ensureCloseControl = (drawer, label) => {
+    let control = drawer.querySelector(".pt-global-navigation__drawer-close");
+    if (control) return control;
+    control = document.createElement("button");
+    control.className = "pt-global-navigation__drawer-close btn btn-light";
+    control.type = "button";
+    control.setAttribute("aria-label", label);
+    control.textContent = "Close";
+    drawer.prepend(control);
+    return control;
+  };
+  ensureCloseControl(sidebar, "Close navigation");
+  ensureCloseControl(tocSidebar, "Close table of contents");
   let contextElement = document.getElementById("pt-global-navigation-context");
   let pageContext = {navigation_id: null, toc: true};
   try {
@@ -69,6 +82,7 @@
   let controlIndex = 0;
   let returnFocus = null;
   let openDrawerName = null;
+  let bodyScrollState = null;
   let preferredNavigationAvailable = false;
   let navigationItems = [];
   let pageController = null;
@@ -77,10 +91,33 @@
   const navigationStateKey = "polyptichNavigation";
   const loadedScripts = new Set();
   const navigationScriptUrl = document.currentScript?.src || "";
-  const navigationIcons = new Set([
-    "agent", "tasks", "sources", "task", "overview", "evidence", "metrics", "examples",
-    "releases", "release", "folder", "document",
+  const navigationIcons = new Map([
+    ["home", "bi-house-door"],
+    ["collection", "bi-collection"],
+    ["database", "bi-database"],
+    ["chart", "bi-graph-up"],
+    ["play", "bi-play-circle"],
+    ["question", "bi-question-circle"],
+    ["history", "bi-clock-history"],
+    ["folder", "bi-folder"],
+    ["document", "bi-file-earmark"],
+    ["agent", "bi-cpu"],
+    ["tasks", "bi-list-check"],
+    ["sources", "bi-database"],
+    ["task", "bi-check2-square"],
+    ["overview", "bi-grid"],
+    ["evidence", "bi-journal-text"],
+    ["metrics", "bi-graph-up-arrow"],
+    ["examples", "bi-images"],
+    ["releases", "bi-list-ul"],
+    ["release", "bi-tag"],
   ]);
+  const mobileMedia = window.matchMedia("(max-width: 64rem)");
+  const focusableSelector = [
+    "a[href]", "area[href]", "button", "input:not([type='hidden'])", "select", "textarea",
+    "details > summary:first-of-type", "iframe", "object", "embed", "audio[controls]",
+    "video[controls]", "[contenteditable]:not([contenteditable='false'])", "[tabindex]",
+  ].join(", ");
 
   const isNavigationAsset = (url) => /\/static\/polyptich-navigation\.(?:js|css)(?:[?#]|$)/.test(url);
   const isCurrentNavigationAsset = (url) => {
@@ -151,34 +188,137 @@
     }
   };
 
+  const enabledFocusableElements = (root) => [...root.querySelectorAll(focusableSelector)]
+    .filter((element) => {
+      if (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") return false;
+      if (element.tabIndex < 0 || element.closest("[inert], [aria-hidden='true']")) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden"
+        && element.getClientRects().length > 0;
+    });
+
+  const setDrawerUnavailable = (drawer, unavailable) => {
+    if (unavailable) {
+      drawer.setAttribute("inert", "");
+      drawer.setAttribute("aria-hidden", "true");
+    } else {
+      drawer.removeAttribute("inert");
+      drawer.removeAttribute("aria-hidden");
+    }
+  };
+
+  const lockBodyScroll = () => {
+    if (bodyScrollState) return;
+    const properties = ["position", "top", "left", "right", "width", "overflow"];
+    bodyScrollState = {
+      x: window.scrollX,
+      y: window.scrollY,
+      styles: Object.fromEntries(properties.map((property) => [property, {
+        value: document.body.style.getPropertyValue(property),
+        priority: document.body.style.getPropertyPriority(property),
+      }])),
+    };
+    document.body.style.setProperty("position", "fixed", "important");
+    document.body.style.setProperty("top", `${-bodyScrollState.y}px`, "important");
+    document.body.style.setProperty("left", `${-bodyScrollState.x}px`, "important");
+    document.body.style.setProperty("right", "0", "important");
+    document.body.style.setProperty("width", "100%", "important");
+    document.body.style.setProperty("overflow", "hidden", "important");
+  };
+
+  const unlockBodyScroll = () => {
+    if (!bodyScrollState) return;
+    const state = bodyScrollState;
+    bodyScrollState = null;
+    Object.entries(state.styles).forEach(([property, previous]) => {
+      if (previous.value) document.body.style.setProperty(property, previous.value, previous.priority);
+      else document.body.style.removeProperty(property);
+    });
+    window.scrollTo(state.x, state.y);
+  };
+
+  const clearDrawerDialogState = () => {
+    for (const drawer of [sidebar, tocSidebar]) {
+      drawer.removeAttribute("aria-modal");
+      drawer.removeAttribute("role");
+    }
+  };
+
+  const syncDrawerAvailability = () => {
+    if (!mobileMedia.matches) {
+      setDrawerUnavailable(sidebar, false);
+      setDrawerUnavailable(tocSidebar, false);
+      return;
+    }
+    setDrawerUnavailable(sidebar, openDrawerName !== "navigation");
+    setDrawerUnavailable(tocSidebar, openDrawerName !== "toc");
+  };
+
+  const focusOutsideDrawer = (drawer) => {
+    const fallback = !tocToggle.hidden && drawer === tocSidebar ? tocToggle : toggle;
+    const target = returnFocus?.isConnected && !drawer.contains(returnFocus) ? returnFocus : fallback;
+    if (typeof target?.focus === "function") target.focus({preventScroll: true});
+    if (drawer.contains(document.activeElement)) fallback.focus({preventScroll: true});
+  };
+
   const openDrawer = (name) => {
+    if (!mobileMedia.matches) return;
+    if (openDrawerName && openDrawerName !== name) closeDrawer();
+    const drawer = name === "toc" ? tocSidebar : sidebar;
+    if (drawer.hidden) return;
     returnFocus = document.activeElement;
     openDrawerName = name;
     shell.classList.toggle("pt-global-navigation--navigation-open", name === "navigation");
     shell.classList.toggle("pt-global-navigation--toc-open", name === "toc");
     toggle.setAttribute("aria-expanded", String(name === "navigation"));
     tocToggle.setAttribute("aria-expanded", String(name === "toc"));
-    const drawer = name === "toc" ? tocSidebar : sidebar;
-    const inactiveDrawer = name === "toc" ? sidebar : tocSidebar;
-    inactiveDrawer.removeAttribute("aria-modal");
-    inactiveDrawer.removeAttribute("role");
+    overlay.setAttribute("aria-label", name === "toc" ? "Close table of contents" : "Close navigation");
+    clearDrawerDialogState();
+    syncDrawerAvailability();
     drawer.setAttribute("aria-modal", "true");
     drawer.setAttribute("role", "dialog");
-    const focusable = drawer.querySelector("a, button, input");
-    if (focusable) focusable.focus();
+    lockBodyScroll();
+    enabledFocusableElements(drawer)[0]?.focus({preventScroll: true});
   };
 
   const closeDrawer = () => {
+    const drawer = openDrawerName === "toc" ? tocSidebar : sidebar;
     shell.classList.remove("pt-global-navigation--navigation-open", "pt-global-navigation--toc-open");
     toggle.setAttribute("aria-expanded", "false");
     tocToggle.setAttribute("aria-expanded", "false");
-    sidebar.removeAttribute("aria-modal");
-    sidebar.removeAttribute("role");
-    tocSidebar.removeAttribute("aria-modal");
-    tocSidebar.removeAttribute("role");
+    overlay.setAttribute("aria-label", "Close navigation");
+    clearDrawerDialogState();
+    if (openDrawerName && mobileMedia.matches) focusOutsideDrawer(drawer);
     openDrawerName = null;
-    if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus();
-    else toggle.focus();
+    returnFocus = null;
+    syncDrawerAvailability();
+    unlockBodyScroll();
+  };
+
+  const handleBreakpointChange = () => {
+    if (mobileMedia.matches) {
+      const focusedDrawer = [sidebar, tocSidebar].find((drawer) => drawer.contains(document.activeElement));
+      if (focusedDrawer) focusOutsideDrawer(focusedDrawer);
+      openDrawerName = null;
+      returnFocus = null;
+      shell.classList.remove("pt-global-navigation--navigation-open", "pt-global-navigation--toc-open");
+      toggle.setAttribute("aria-expanded", "false");
+      tocToggle.setAttribute("aria-expanded", "false");
+      overlay.setAttribute("aria-label", "Close navigation");
+      clearDrawerDialogState();
+      syncDrawerAvailability();
+      unlockBodyScroll();
+      return;
+    }
+    openDrawerName = null;
+    returnFocus = null;
+    shell.classList.remove("pt-global-navigation--navigation-open", "pt-global-navigation--toc-open");
+    toggle.setAttribute("aria-expanded", "false");
+    tocToggle.setAttribute("aria-expanded", "false");
+    overlay.setAttribute("aria-label", "Close navigation");
+    clearDrawerDialogState();
+    syncDrawerAvailability();
+    unlockBodyScroll();
   };
 
   toggle.addEventListener("click", () => {
@@ -190,6 +330,9 @@
     else openDrawer("toc");
   });
   overlay.addEventListener("click", closeDrawer);
+  shell.querySelectorAll(".pt-global-navigation__drawer-close").forEach((control) => {
+    control.addEventListener("click", closeDrawer);
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && openDrawerName) {
       event.preventDefault();
@@ -197,11 +340,17 @@
     }
     if (event.key !== "Tab" || !openDrawerName) return;
     const drawer = openDrawerName === "toc" ? tocSidebar : sidebar;
-    const focusable = [...drawer.querySelectorAll("a[href], button:not([disabled]), input:not([disabled])")];
-    if (!focusable.length) return;
+    const focusable = enabledFocusableElements(drawer);
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    if (!drawer.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -209,6 +358,12 @@
       first.focus();
     }
   });
+  if (typeof mobileMedia.addEventListener === "function") {
+    mobileMedia.addEventListener("change", handleBreakpointChange);
+  } else {
+    mobileMedia.addListener(handleBreakpointChange);
+  }
+  handleBreakpointChange();
 
   const isLocalUrl = (value) => {
     if (typeof value !== "string" || !value || value.length > 2048 || value.includes("\\")) return false;
@@ -271,7 +426,7 @@
   const makeIcon = (icon) => {
     if (!navigationIcons.has(icon)) return null;
     const element = document.createElement("span");
-    element.className = "pt-global-navigation__icon";
+    element.className = `pt-global-navigation__icon bi ${navigationIcons.get(icon)}`;
     element.dataset.icon = icon;
     element.setAttribute("aria-hidden", "true");
     return element;

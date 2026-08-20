@@ -82,15 +82,32 @@
 }
 
 #pt-global-navigation-shell .pt-global-navigation__body {
+  flex: 1 1 auto;
   min-height: 0;
   padding: 1rem 0.8rem;
   overflow: auto;
 }
 
+#pt-global-navigation-shell .pt-global-navigation__drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
 #pt-global-navigation-shell .pt-global-navigation__heading {
-  margin: 0 0.25rem 0.85rem;
+  margin: 0 0.25rem;
   font-size: 1.05rem;
   font-weight: 700;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__drawer-close {
+  display: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__drawer-header--mobile {
+  display: none;
 }
 
 #pt-global-navigation-shell .pt-global-navigation__mobile-controls,
@@ -175,27 +192,10 @@
   flex: 0 0 1rem;
   width: 1rem;
   color: var(--pt-nav-muted);
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   line-height: 1;
   text-align: center;
 }
-
-#pt-global-navigation-shell .pt-global-navigation__icon::before {
-  content: "•";
-}
-
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="agent"]::before { content: "A"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="tasks"]::before { content: "T"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="sources"]::before { content: "S"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="task"]::before { content: "✓"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="overview"]::before { content: "▦"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="evidence"]::before { content: "◫"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="metrics"]::before { content: "↗"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="examples"]::before { content: "◇"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="releases"]::before { content: "≡"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="release"]::before { content: "◆"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="folder"]::before { content: "▸"; }
-#pt-global-navigation-shell .pt-global-navigation__icon[data-icon="document"]::before { content: "□"; }
 
 #pt-global-navigation-shell .pt-global-navigation__link,
 #pt-global-navigation-shell .pt-global-navigation__label,
@@ -443,6 +443,7 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
 
   #pt-global-navigation-shell .pt-global-navigation__sidebar,
   #pt-global-navigation-shell .pt-global-navigation__toc-sidebar {
+    width: min(var(--pt-nav-width), calc(100vw - 2rem));
     transform: translateX(-105%);
     transition: transform 160ms ease;
   }
@@ -453,6 +454,19 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
     border-right: 1px solid var(--pt-nav-border);
     border-left: 0;
     box-shadow: 1px 0 4px rgb(16 24 40 / 8%);
+  }
+
+  #pt-global-navigation-shell .pt-global-navigation__drawer-close {
+    display: inline-flex;
+    flex: 0 0 auto;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--pt-nav-border);
+    color: var(--pt-nav-text);
+    font: 700 0.8rem/1.2 var(--bs-body-font-family);
+  }
+
+  #pt-global-navigation-shell .pt-global-navigation__drawer-header--mobile {
+    display: flex;
   }
 
   #pt-global-navigation-shell.pt-global-navigation--navigation-open .pt-global-navigation__sidebar,
@@ -480,6 +494,7 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #pt-global-navigation-shell::after,
   #pt-global-navigation-shell .pt-global-navigation__sidebar,
   #pt-global-navigation-shell .pt-global-navigation__toc-sidebar,
   #pt-global-navigation-shell .pt-global-navigation__disclosure::before {

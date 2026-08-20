@@ -13,6 +13,15 @@ COLLECTION_SCHEMA_VERSION = 1
 _NODE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
 NAVIGATION_ICONS = frozenset(
     {
+        "home",
+        "collection",
+        "database",
+        "chart",
+        "play",
+        "question",
+        "history",
+        "folder",
+        "document",
         "agent",
         "tasks",
         "sources",
@@ -23,8 +32,6 @@ NAVIGATION_ICONS = frozenset(
         "examples",
         "releases",
         "release",
-        "folder",
-        "document",
     }
 )
 _NODE_KEYS = {"id", "label", "type", "href", "children", "favorite", "collection", "icon"}

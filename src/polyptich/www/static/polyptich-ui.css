@@ -1,8 +1,5 @@
 :root {
   color-scheme: light;
-  --bd-accent-rgb: 255, 193, 7;
-  --bd-violet-rgb: 112, 44, 249;
-  --bd-pink-rgb: 214, 51, 132;
   --pt-font-sans: var(--bs-body-font-family);
   --pt-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --pt-bg: var(--bs-body-bg);
@@ -26,13 +23,12 @@
   background-image:
     linear-gradient(
       180deg,
-      rgba(var(--bs-body-bg-rgb), 0.01),
-      rgba(var(--bs-body-bg-rgb), 1) 85%
+      rgba(var(--bs-primary-rgb), 0.06),
+      rgba(var(--bs-body-bg-rgb), 0.96) 65%,
+      var(--bs-body-bg) 100%
     ),
-    radial-gradient(ellipse at top left, rgba(var(--bs-primary-rgb), 0.32), transparent 50%),
-    radial-gradient(ellipse at top right, rgba(var(--bd-accent-rgb), 0.24), transparent 50%),
-    radial-gradient(ellipse at center right, rgba(var(--bd-violet-rgb), 0.2), transparent 50%),
-    radial-gradient(ellipse at center left, rgba(var(--bd-pink-rgb), 0.18), transparent 50%);
+    radial-gradient(ellipse at top left, rgba(var(--bs-primary-rgb), 0.16), transparent 52%),
+    radial-gradient(ellipse at top right, rgba(var(--bs-warning-rgb), 0.12), transparent 48%);
 }
 
 :where(.pt-button, .www-button):not(.btn) {
@@ -191,4 +187,16 @@
   border: 1px solid var(--pt-border-strong);
   border-radius: var(--bs-border-radius);
   box-shadow: none;
+}
+
+@media (forced-colors: active) {
+  .pt-surface-gradient {
+    background-color: Canvas;
+    background-image: none;
+    border-color: CanvasText;
+  }
+
+  :where(.pt-button, .www-button):not(.btn) {
+    border: 1px solid CanvasText;
+  }
 }

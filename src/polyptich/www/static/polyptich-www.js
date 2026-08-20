@@ -60,16 +60,24 @@
     return tabs.some((tab) => tab.id === value) ? value : null;
   }
 
-  function activateTab(wrapper, groupId, tabId) {
-    wrapper.querySelectorAll(".tab-button").forEach((button) => {
+  function activateTab(wrapper, groupId, tabId, focus = false) {
+    let activeButton = null;
+    wrapper.querySelectorAll(":scope > .tab-buttons > .tab-button").forEach((button) => {
       const active = button.dataset.tab === tabId;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
+      button.tabIndex = active ? 0 : -1;
+      if (active) activeButton = button;
     });
-    wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+    wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel) => {
+      const active = panel.id === tabId;
+      panel.classList.toggle("active", active);
+      panel.hidden = !active;
+    });
     const params = new URLSearchParams(location.hash.replace(/^#/, ""));
     params.set("tab-" + groupId, tabId);
-    history.replaceState(null, "", "#" + params.toString());
+    history.replaceState(history.state, "", "#" + params.toString());
+    if (focus) activeButton?.focus();
     queueRender(wrapper);
   }
 
@@ -81,11 +89,26 @@
         const active = selected ? button.dataset.tab === selected : index === 0;
         button.classList.toggle("active", active);
         button.setAttribute("aria-selected", active ? "true" : "false");
+        button.tabIndex = active ? 0 : -1;
         button.addEventListener("click", () => activateTab(wrapper, wrapper.id, button.dataset.tab));
+        button.addEventListener("keydown", (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          let targetIndex;
+          if (event.key === "Home") targetIndex = 0;
+          else if (event.key === "End") targetIndex = buttons.length - 1;
+          else {
+            const offset = event.key === "ArrowRight" ? 1 : -1;
+            targetIndex = (buttons.indexOf(button) + offset + buttons.length) % buttons.length;
+          }
+          const target = buttons[targetIndex];
+          if (target) activateTab(wrapper, wrapper.id, target.dataset.tab, true);
+        });
       });
       wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel, index) => {
         const active = selected ? panel.id === selected : index === 0;
         panel.classList.toggle("active", active);
+        panel.hidden = !active;
       });
     });
   }

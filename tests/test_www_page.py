@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -61,6 +62,39 @@ def test_tabs_preserve_insertion_order(tmp_path):
     html = (tmp_path / "www" / "report" / "index.html").read_text()
     assert html.index("Sample A") < html.index("Sample B")
     assert 'role="tab"' in html
+    assert (
+        'id="sample-a-tab" type="button" role="tab" aria-selected="true" '
+        'aria-controls="sample-a" tabindex="0" data-tab="sample-a"'
+    ) in html
+    assert (
+        'id="sample-b-tab" type="button" role="tab" aria-selected="false" '
+        'aria-controls="sample-b" tabindex="-1" data-tab="sample-b"'
+    ) in html
+    assert (
+        'class="tab-panel active" id="sample-a" role="tabpanel" '
+        'aria-labelledby="sample-a-tab" tabindex="0"'
+    ) in html
+    assert (
+        'class="tab-panel" id="sample-b" role="tabpanel" '
+        'aria-labelledby="sample-b-tab" tabindex="0" hidden'
+    ) in html
+
+
+def test_tab_script_supports_roving_keyboard_navigation_and_persisted_selection():
+    script = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyptich"
+        / "www"
+        / "static"
+        / "polyptich-www.js"
+    ).read_text()
+
+    for key in ["ArrowLeft", "ArrowRight", "Home", "End"]:
+        assert f'"{key}"' in script
+    assert "button.tabIndex = active ? 0 : -1" in script
+    assert "panel.hidden = !active" in script
+    assert "history.replaceState(history.state" in script
 
 
 def test_cards_can_contain_arbitrary_html_and_links(tmp_path):

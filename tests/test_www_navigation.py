@@ -1,8 +1,14 @@
 import json
+from pathlib import Path
 
 import pytest
 
-from polyptich.www import AccessIdentity, create_app, render_workspace_document
+from polyptich.www import (
+    AccessIdentity,
+    create_app,
+    render_workspace_app,
+    render_workspace_document,
+)
 from polyptich.www.auth import AccessVerificationError
 
 
@@ -36,8 +42,9 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     )
     assert document.count("data-polyptich-navigation-shell") == 1
     assert 'data-polyptich-page-version="1"' in document
-    assert document.count("data-polyptich-navigation-persistent") == 5
+    assert document.count("data-polyptich-navigation-persistent") == 6
     assert 'href="/static/bootstrap-5.3.8.min.css"' in document
+    assert 'href="/static/bootstrap-icons-1.13.1.min.css"' in document
     assert 'href="/static/polyptich-ui.css"' in document
     assert 'href="/static/polyptich-navigation.css"' in document
     assert document.index("bootstrap-5.3.8.min.css") < document.index("polyptich-ui.css")
@@ -49,6 +56,9 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     assert 'id="pt-global-navigation-sidebar"' in document
     assert 'id="pt-global-navigation-toc-sidebar"' in document
     assert 'class="pt-global-navigation__toc-toggle btn btn-light"' in document
+    assert document.count("pt-global-navigation__drawer-close btn btn-light") == 2
+    assert 'aria-label="Close navigation">Close</button>' in document
+    assert 'aria-label="Close table of contents">Close</button>' in document
 
     styled = render_workspace_document(
         "Styled", "content", stylesheets=("/page.css",), head_html="<style>main { color: red; }</style>"
@@ -94,8 +104,48 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     )
     assert b'href="/gateway/static/polyptich-navigation.css"' in prefixed.data
     assert b'href="/gateway/static/bootstrap-5.3.8.min.css"' in prefixed.data
+    assert b'href="/gateway/static/bootstrap-icons-1.13.1.min.css"' in prefixed.data
     assert b'src="/gateway/static/bootstrap-5.3.8.bundle.min.js"' in prefixed.data
     assert b'data-navigation-url="/gateway/api/v1/navigation"' in prefixed.data
+
+
+def test_workspace_app_places_versioned_bootstrap_inside_main(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = create_app(tmp_path, access_verifier=FakeVerifier())
+
+    with app.test_request_context(
+        "/endpoint/example/", environ_overrides={"SCRIPT_NAME": "/gateway"}
+    ):
+        response = render_workspace_app(
+            "Example",
+            app_id="example.app",
+            mount_id="example-root",
+            bootstrap={"page": "detail", "unsafe": "</script><script>alert(1)</script>"},
+            bootstrap_id="example-bootstrap",
+            stylesheets=("/endpoint/example/app.css",),
+            module_scripts=("/endpoint/example/app.js", "/endpoint/example/app.js"),
+            navigation_id="example",
+            main_class="example-page",
+        )
+
+    document = response.get_data(as_text=True)
+    assert 'id="example-root" data-polyptich-app="example.app"' in document
+    assert 'data-polyptich-bootstrap="example-bootstrap"' in document
+    assert 'id="example-bootstrap" type="application/json"' in document
+    assert '"schema_id":"polyptich.www.app-bootstrap"' in document
+    assert '"app_id":"example.app"' in document
+    assert "</script><script>alert(1)" not in document
+    assert "\\u003c/script\\u003e" in document
+    assert document.index('id="pt-global-navigation-main"') < document.index('id="example-root"')
+    assert document.index('id="example-bootstrap"') < document.index("</main>")
+    assert document.count('src="/endpoint/example/app.js"') == 1
+    assert 'type="module" src="/endpoint/example/app.js" data-polyptich-script="once"' in document
+    assert 'href="/gateway/static/bootstrap-icons-1.13.1.min.css"' in document
+
+    with app.test_request_context("/"), pytest.raises(ValueError, match="app_id"):
+        render_workspace_app(
+            "Invalid", app_id="", mount_id="root", bootstrap={}, module_scripts=()
+        )
 
 
 def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_path):
@@ -333,3 +383,33 @@ def test_collection_search_is_enabled_only_by_an_explicit_placeholder(tmp_path):
 
     assert "placeholder" not in items[0]["collection"]
     assert items[1]["collection"]["placeholder"] == "Find a report"
+
+
+def test_mobile_drawer_and_shared_preference_contracts_are_present():
+    static = Path(__file__).parents[1] / "src" / "polyptich" / "www" / "static"
+    navigation_script = (static / "polyptich-navigation.js").read_text()
+    navigation_css = (static / "polyptich-navigation.css").read_text()
+    ui_css = (static / "polyptich-ui.css").read_text()
+    product_css = (static / "polyptich-www.css").read_text()
+
+    assert 'window.matchMedia("(max-width: 64rem)")' in navigation_script
+    assert 'drawer.setAttribute("inert", "")' in navigation_script
+    assert 'drawer.setAttribute("aria-hidden", "true")' in navigation_script
+    assert 'drawer.removeAttribute("inert")' in navigation_script
+    assert "focusOutsideDrawer(drawer)" in navigation_script
+    assert 'event.key === "Escape"' in navigation_script
+    assert 'event.key !== "Tab"' in navigation_script
+    for selector in ["select", "textarea", "[contenteditable]", "[tabindex]"]:
+        assert selector in navigation_script
+    assert 'document.body.style.setProperty("position", "fixed", "important")' in navigation_script
+    assert "window.scrollTo(state.x, state.y)" in navigation_script
+    assert ".pt-global-navigation__drawer-close" in navigation_css
+    assert "@media (prefers-reduced-motion: reduce)" in navigation_css
+
+    gradient_rule = ui_css.split(".pt-surface-gradient {", 1)[1].split("}", 1)[0]
+    assert gradient_rule.count("linear-gradient(") == 1
+    assert gradient_rule.count("radial-gradient(") == 2
+    assert "@media (forced-colors: active)" in ui_css
+    assert "background-image: none" in ui_css
+    assert "\nbody {" not in product_css
+    assert ":where(.browser, .report, .error-page) a" in product_css

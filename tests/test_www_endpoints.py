@@ -99,6 +99,8 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
         "/files/public.txt",
         "/static/bootstrap-5.3.8.min.css",
         "/static/bootstrap-5.3.8.bundle.min.js",
+        "/static/bootstrap-icons-1.13.1.min.css",
+        "/static/fonts/bootstrap-icons.woff2",
         "/static/polyptich-www.css",
     ]:
         assert client.get(path).status_code == 401
@@ -112,6 +114,10 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert "default-src 'self'" in root_page.headers["Content-Security-Policy"]
     assert b"public.txt" in root_page.data
     assert b"private/" not in root_page.data
+    assert client.get(
+        "/static/bootstrap-icons-1.13.1.min.css", headers=regular
+    ).status_code == 200
+    assert client.get("/static/fonts/bootstrap-icons.woff2", headers=regular).status_code == 200
     assert client.get("/report-data/unsafe-report/plot", headers=regular).status_code == 403
     for path in [
         "/browse/private",
@@ -434,6 +440,77 @@ def test_unknown_endpoint_id_fails_startup_without_importing_a_handler(tmp_path)
         server.create_app(tmp_path, access_verifier=FakeVerifier(), endpoint_factories={})
 
 
+def test_configured_product_home_redirects_only_root_with_proxy_prefix(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        home_url="/endpoint/dashboard/",
+    )
+    client = app.test_client()
+
+    root = client.get("/", headers=auth("reader@example.test"))
+    prefixed = client.get(
+        "/",
+        headers=auth("reader@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+
+    assert root.status_code == 302
+    assert root.headers["Location"] == "/endpoint/dashboard/"
+    assert prefixed.headers["Location"] == "/gateway/endpoint/dashboard/"
+    assert client.get("/browse/", headers=auth("reader@example.test")).status_code == 200
+    assert client.get(
+        "/", headers=auth("reader@example.test"), follow_redirects=True
+    ).status_code == 404
+
+
+def test_product_home_destination_uses_existing_endpoint_authorization(tmp_path):
+    write_manifest(
+        tmp_path / "www" / "dashboard",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.home",
+            "required_scope": "private.read",
+        },
+    )
+
+    class HomeEndpoint:
+        def __init__(self, **_kwargs):
+            pass
+
+        def register(self, app, mount_url, endpoint_name):
+            app.add_url_rule(mount_url + "/", endpoint_name, lambda: "dashboard")
+
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        trusted_viewer_emails=["viewer@example.test"],
+        endpoint_factories={"tests.home": HomeEndpoint},
+        home_url="/endpoint/dashboard/",
+    )
+    client = app.test_client()
+
+    assert client.get(
+        "/", headers=auth("reader@example.test"), follow_redirects=True
+    ).status_code == 403
+    assert client.get(
+        "/", headers=auth("viewer@example.test"), follow_redirects=True
+    ).get_data(as_text=True) == "dashboard"
+
+
+@pytest.mark.parametrize(
+    "home_url",
+    ["", "/", "/?next=dashboard", "//example.test/home", "dashboard", " /home", "/\\home"],
+)
+def test_product_home_rejects_nonlocal_or_looping_paths(tmp_path, home_url):
+    (tmp_path / "www").mkdir()
+
+    with pytest.raises(ValueError, match="local absolute path other than root"):
+        server.create_app(tmp_path, access_verifier=FakeVerifier(), home_url=home_url)
+
+
 def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(server, "create_app", lambda root, **kwargs: (root, kwargs))
@@ -460,6 +537,8 @@ def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatc
         "operator@example.test",
         "--external-origin",
         "https://www.example.test",
+        "--home-url",
+        "/endpoint/dashboard/",
     ]
 
     assert server.main(arguments) == 0
@@ -469,6 +548,7 @@ def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatc
     assert isinstance(options["access_config"], AccessConfig)
     assert options["trusted_proxy"] is True
     assert options["operator_emails"] == ["operator@example.test"]
+    assert options["home_url"] == "/endpoint/dashboard/"
     non_loopback = list(arguments)
     non_loopback[3] = "0.0.0.0"
     with pytest.raises(ValueError, match="literal loopback"):

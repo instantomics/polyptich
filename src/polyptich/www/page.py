@@ -355,14 +355,20 @@ class Page(ComponentContainer):
         for index, tab in enumerate(component.get("tabs", [])):
             active = " active" if index == 0 else ""
             selected = "true" if index == 0 else "false"
+            tabindex = "0" if index == 0 else "-1"
+            hidden = "" if index == 0 else " hidden"
             tab_id = escape(tab.get("id", ""), quote=True)
+            button_id = f"{tab_id}-tab"
             tab_title = escape(str(tab.get("title") or "Tab"))
             buttons.append(
-                f'<button class="tab-button{active}" type="button" role="tab" aria-selected="{selected}" data-tab="{tab_id}">{tab_title}</button>'
+                f'<button class="tab-button{active}" id="{button_id}" type="button" '
+                f'role="tab" aria-selected="{selected}" aria-controls="{tab_id}" '
+                f'tabindex="{tabindex}" data-tab="{tab_id}">{tab_title}</button>'
             )
             panel = "\n".join(self._render_components(tab.get("children", [])))
             panels.append(
-                f'<div class="tab-panel{active}" id="{tab_id}" role="tabpanel">{panel}</div>'
+                f'<div class="tab-panel{active}" id="{tab_id}" role="tabpanel" '
+                f'aria-labelledby="{button_id}" tabindex="0"{hidden}>{panel}</div>'
             )
         return f'<section class="component tabs" id="{id_attr}">{title}<div class="tab-buttons" role="tablist">{"".join(buttons)}</div><div class="tab-panels">{"".join(panels)}</div></section>'
 

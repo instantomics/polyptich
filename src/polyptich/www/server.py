@@ -60,6 +60,7 @@ def create_app(
     operator_emails=(),
     endpoint_factories=None,
     external_origin=None,
+    home_url=None,
     restart_callback=None,
 ):
     if access_verifier is None:
@@ -70,6 +71,7 @@ def create_app(
     workspace_root = Path(root).resolve()
     base_dir = (workspace_root / "www").resolve()
     external_origin = _validate_external_origin(external_origin)
+    home_url = _validate_home_url(home_url)
     manifests = _read_initial_manifests(base_dir)
     navigation = load_navigation(base_dir, manifests)
 
@@ -90,6 +92,7 @@ def create_app(
         POLYPTICH_WWW_WORKSPACE_ROOT=workspace_root,
         POLYPTICH_WWW_ROOT_PATH=base_dir,
         POLYPTICH_WWW_EXTERNAL_ORIGIN=external_origin,
+        POLYPTICH_WWW_HOME_URL=home_url,
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
         POLYPTICH_WWW_ENDPOINT_SCOPES={},
         POLYPTICH_WWW_NAVIGATION=navigation,
@@ -170,6 +173,8 @@ def create_app(
     @app.route("/browse/")
     @app.route("/browse/<path:subpath>")
     def browse(subpath=""):
+        if request.path == "/" and home_url is not None:
+            return redirect(_request_local_url(home_url))
         current = safe_path(subpath)
         query = request.args.get("q", "").strip()
         if not current.is_dir():
@@ -591,6 +596,25 @@ def _validate_external_origin(origin):
     return normalized
 
 
+def _validate_home_url(value):
+    if value is None:
+        return None
+    if not isinstance(value, str) or value != value.strip() or not value:
+        raise ValueError("Product home URL must be a local absolute path other than root")
+    parsed = urlparse(value)
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
+        or parsed.path == "/"
+        or "\\" in value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError("Product home URL must be a local absolute path other than root")
+    return value
+
+
 def _validate_loopback(host):
     try:
         address = ipaddress.ip_address(host)
@@ -821,6 +845,7 @@ def main(argv=None):
     parser.add_argument("--trusted-viewer-email", action="append", default=[])
     parser.add_argument("--operator-email", action="append", default=[])
     parser.add_argument("--external-origin")
+    parser.add_argument("--home-url")
     args = parser.parse_args(argv)
 
     _validate_loopback(args.host)
@@ -834,6 +859,7 @@ def main(argv=None):
         trusted_viewer_emails=args.trusted_viewer_email,
         operator_emails=args.operator_email,
         external_origin=args.external_origin,
+        home_url=args.home_url,
     )
     from waitress import serve
 
