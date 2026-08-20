@@ -430,7 +430,7 @@ def _path_for_href(href, base_dir, endpoint_paths):
 
 
 def _required_scope_value(base_dir, target):
-    scope = "reports.read"
+    scope = "dashboard.read"
     relative = target.resolve().relative_to(base_dir)
     current = base_dir
     for part in (None, *relative.parts):

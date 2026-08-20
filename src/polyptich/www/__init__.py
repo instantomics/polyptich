@@ -2,8 +2,8 @@ from . import components
 from .auth import (
     AGENT_CONTROL,
     AGENT_READ,
+    DASHBOARD_READ,
     PRIVATE_READ,
-    REPORTS_READ,
     SERVICE_RESTART,
     AccessConfig,
     AccessIdentity,
@@ -23,8 +23,8 @@ from .server import create_app, main, register_service_restart_control
 __all__ = [
     "AGENT_CONTROL",
     "AGENT_READ",
+    "DASHBOARD_READ",
     "PRIVATE_READ",
-    "REPORTS_READ",
     "SERVICE_RESTART",
     "AccessConfig",
     "AccessIdentity",

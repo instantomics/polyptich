@@ -399,7 +399,7 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_global_navigati
     assert controlled.get_json() == {"controlled_by": "operator@example.test"}
     operator_page = client.get("/endpoint/private/agent/", headers=auth("operator@example.test"))
     for scope in [
-        b"reports.read",
+        b"dashboard.read",
         b"agent.read",
         b"private.read",
         b"agent.control",

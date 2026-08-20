@@ -24,7 +24,7 @@ from flask import (
 )
 
 from .auth import (
-    REPORTS_READ,
+    DASHBOARD_READ,
     SERVICE_RESTART,
     AccessConfig,
     AccessVerificationError,
@@ -153,7 +153,7 @@ def create_app(
             request.path,
             request.endpoint,
         )
-        require_scope(required or REPORTS_READ)
+        require_scope(required or DASHBOARD_READ)
         return None
 
     @app.get("/healthz")
@@ -504,7 +504,7 @@ def _required_scope(base_dir, target):
         relative = target.relative_to(base_dir)
     except ValueError:
         abort(403)
-    scope = REPORTS_READ
+    scope = DASHBOARD_READ
     current = base_dir
     folders = [base_dir]
     parts = relative.parts if target.is_dir() else relative.parts[:-1]

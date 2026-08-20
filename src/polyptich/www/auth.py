@@ -4,8 +4,7 @@ from urllib.parse import urlparse
 
 from flask import abort, g
 
-
-REPORTS_READ = "reports.read"
+DASHBOARD_READ = "dashboard.read"
 AGENT_READ = "agent.read"
 PRIVATE_READ = "private.read"
 AGENT_CONTROL = "agent.control"
@@ -106,7 +105,7 @@ def scopes_for_email(email, *, trusted_viewer_emails=(), operator_emails=()):
     normalized = email.casefold()
     trusted = {value.casefold() for value in trusted_viewer_emails}
     operators = {value.casefold() for value in operator_emails}
-    scopes = {REPORTS_READ, AGENT_READ}
+    scopes = {DASHBOARD_READ, AGENT_READ}
     if normalized in trusted or normalized in operators:
         scopes.add(PRIVATE_READ)
     if normalized in operators:
