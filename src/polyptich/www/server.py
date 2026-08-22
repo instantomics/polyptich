@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import stat
 import sys
 from datetime import datetime
 from importlib import metadata
@@ -29,6 +30,7 @@ from .auth import (
     AccessConfig,
     AccessVerificationError,
     CloudflareAccessVerifier,
+    LoopbackDeveloperAccessVerifier,
     has_scope,
     require_scope,
     scopes_for_email,
@@ -55,6 +57,7 @@ def create_app(
     *,
     access_config=None,
     access_verifier=None,
+    developer_access_verifier=None,
     trusted_proxy=False,
     trusted_viewer_emails=(),
     operator_emails=(),
@@ -64,9 +67,11 @@ def create_app(
     restart_callback=None,
 ):
     if access_verifier is None:
-        if access_config is None:
+        if access_config is None and developer_access_verifier is None:
             raise ValueError("Cloudflare Access configuration or an Access verifier is required")
-        access_verifier = CloudflareAccessVerifier(access_config)
+        access_verifier = (
+            CloudflareAccessVerifier(access_config) if access_config is not None else None
+        )
 
     workspace_root = Path(root).resolve()
     base_dir = (workspace_root / "www").resolve()
@@ -140,10 +145,18 @@ def create_app(
     def authenticate_and_authorize():
         if request.endpoint in {"healthz", "readyz"}:
             return None
-        token = request.headers.get("Cf-Access-Jwt-Assertion", "")
         try:
-            identity = access_verifier.verify(token)
-        except AccessVerificationError as error:
+            developer_token = request.headers.get("X-Polyptich-Developer-Key", "")
+            if developer_token and developer_access_verifier is not None:
+                _validate_loopback(request.remote_addr or "")
+                identity = developer_access_verifier.verify(developer_token)
+            elif access_verifier is not None:
+                identity = access_verifier.verify(
+                    request.headers.get("Cf-Access-Jwt-Assertion", "")
+                )
+            else:
+                raise AccessVerificationError("Loopback developer key is missing")
+        except (AccessVerificationError, ValueError) as error:
             return jsonify({"error": "access_denied", "message": str(error)}), 401
         g.polyptich_access_identity = identity
         g.polyptich_access_scopes = scopes_for_email(
@@ -624,6 +637,25 @@ def _validate_loopback(host):
         raise ValueError("Polyptich WWW requires a literal loopback host")
 
 
+def _read_developer_key(value):
+    path = Path(value)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ValueError(f"Unable to open developer access key file: {path}") from error
+    with os.fdopen(descriptor, encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Developer access key must be a regular file")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("Developer access key file permissions must be 0600")
+        key = handle.read().strip()
+    if len(key) < 32:
+        raise ValueError("Developer access key must contain at least 32 characters")
+    return key
+
+
 def _has_symlink(base_dir, target):
     try:
         relative = target.relative_to(base_dir)
@@ -840,8 +872,10 @@ def main(argv=None):
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5002")))
     parser.add_argument("--trusted-proxy", action="store_true")
-    parser.add_argument("--access-issuer", required=True)
-    parser.add_argument("--access-audience", required=True)
+    parser.add_argument("--access-issuer")
+    parser.add_argument("--access-audience")
+    parser.add_argument("--developer-key-file")
+    parser.add_argument("--developer-email", default="playwright@localhost")
     parser.add_argument("--trusted-viewer-email", action="append", default=[])
     parser.add_argument("--operator-email", action="append", default=[])
     parser.add_argument("--external-origin")
@@ -851,10 +885,26 @@ def main(argv=None):
     _validate_loopback(args.host)
     if not 1 <= args.port <= 65535:
         parser.error("port must be between 1 and 65535")
-    access_config = AccessConfig(issuer=args.access_issuer, audience=args.access_audience)
+    if bool(args.access_issuer) != bool(args.access_audience):
+        parser.error("--access-issuer and --access-audience must be provided together")
+    if not args.access_issuer and not args.developer_key_file:
+        parser.error("Cloudflare Access or --developer-key-file is required")
+    access_config = (
+        AccessConfig(issuer=args.access_issuer, audience=args.access_audience)
+        if args.access_issuer
+        else None
+    )
+    developer_access_verifier = (
+        LoopbackDeveloperAccessVerifier(
+            _read_developer_key(args.developer_key_file), email=args.developer_email
+        )
+        if args.developer_key_file
+        else None
+    )
     app = create_app(
         args.root,
         access_config=access_config,
+        developer_access_verifier=developer_access_verifier,
         trusted_proxy=args.trusted_proxy,
         trusted_viewer_emails=args.trusted_viewer_email,
         operator_emails=args.operator_email,

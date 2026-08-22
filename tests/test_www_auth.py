@@ -5,7 +5,11 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from polyptich.www import AccessConfig, CloudflareAccessVerifier
+from polyptich.www import (
+    AccessConfig,
+    CloudflareAccessVerifier,
+    LoopbackDeveloperAccessVerifier,
+)
 from polyptich.www.auth import AccessVerificationError
 
 
@@ -66,3 +70,19 @@ def test_access_configuration_and_app_reject_unauthenticated_setup(tmp_path):
 
     with pytest.raises(ValueError, match="Access configuration or an Access verifier"):
         create_app(tmp_path)
+
+
+def test_loopback_developer_verifier_requires_exact_strong_key():
+    verifier = LoopbackDeveloperAccessVerifier(
+        "a" * 64, email="developer@example.test"
+    )
+
+    identity = verifier.verify("a" * 64)
+
+    assert identity.email == "developer@example.test"
+    assert identity.issuer == "polyptich://loopback-developer"
+    for token in ("", "b" * 64, "é" * 64):
+        with pytest.raises(AccessVerificationError):
+            verifier.verify(token)
+    with pytest.raises(ValueError, match="at least 32"):
+        LoopbackDeveloperAccessVerifier("short")

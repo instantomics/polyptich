@@ -8,6 +8,7 @@ from flask import jsonify
 from polyptich.www import (
     AccessConfig,
     AccessIdentity,
+    LoopbackDeveloperAccessVerifier,
     OverviewGrid,
     current_identity,
     current_scopes,
@@ -35,6 +36,44 @@ class FakeVerifier:
 
 def auth(email):
     return {"Cf-Access-Jwt-Assertion": email}
+
+
+def test_loopback_developer_key_authentication_is_loopback_only(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        developer_access_verifier=LoopbackDeveloperAccessVerifier(
+            "a" * 64, email="developer@example.test"
+        ),
+    )
+    client = app.test_client()
+    headers = {"X-Polyptich-Developer-Key": "a" * 64}
+
+    assert client.get("/", headers=headers).status_code == 200
+    assert (
+        client.get(
+            "/", headers=headers, environ_overrides={"REMOTE_ADDR": "192.0.2.1"}
+        ).status_code
+        == 401
+    )
+    assert client.get("/").status_code == 401
+
+
+def test_developer_key_file_requires_exact_private_permissions(tmp_path):
+    key_file = tmp_path / "developer.key"
+    key_file.write_text("a" * 64)
+    key_file.chmod(0o600)
+
+    assert server._read_developer_key(key_file) == "a" * 64
+
+    key_file.chmod(0o640)
+    with pytest.raises(ValueError, match="permissions must be 0600"):
+        server._read_developer_key(key_file)
+    key_file.chmod(0o600)
+    symlink = tmp_path / "developer-link.key"
+    symlink.symlink_to(key_file)
+    with pytest.raises(ValueError, match="Unable to open"):
+        server._read_developer_key(symlink)
 
 
 def write_manifest(path, value):
@@ -553,3 +592,32 @@ def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatc
     non_loopback[3] = "0.0.0.0"
     with pytest.raises(ValueError, match="literal loopback"):
         server.main(non_loopback)
+
+
+def test_developer_cli_wires_file_backed_verifier(tmp_path, monkeypatch):
+    captured = {}
+    key_file = tmp_path / "developer.key"
+    key_file.write_text("a" * 64)
+    key_file.chmod(0o600)
+    monkeypatch.setattr(server, "create_app", lambda root, **kwargs: (root, kwargs))
+    monkeypatch.setitem(
+        sys.modules,
+        "waitress",
+        SimpleNamespace(serve=lambda app, **kwargs: captured.update(app=app, serve=kwargs)),
+    )
+
+    assert server.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--developer-key-file",
+            str(key_file),
+            "--developer-email",
+            "developer@example.test",
+        ]
+    ) == 0
+
+    _, options = captured["app"]
+    assert options["access_config"] is None
+    identity = options["developer_access_verifier"].verify("a" * 64)
+    assert identity.email == "developer@example.test"

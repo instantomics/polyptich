@@ -1,5 +1,9 @@
+from __future__ import annotations
+
+import hmac
+import time
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from flask import abort, g
@@ -19,7 +23,7 @@ class AccessVerificationError(ValueError):
 class AccessConfig:
     issuer: str
     audience: str
-    jwks_url: Optional[str] = None
+    jwks_url: str | None = None
 
     def __post_init__(self):
         issuer = self.issuer.rstrip("/")
@@ -79,6 +83,29 @@ class CloudflareAccessVerifier:
         except self._jwt.PyJWTError as error:
             raise AccessVerificationError("Cloudflare Access JWT is invalid") from error
         return _identity_from_claims(claims, self._config)
+
+
+class LoopbackDeveloperAccessVerifier:
+    def __init__(self, key, *, email="playwright@localhost"):
+        key = str(key)
+        email = str(email).strip()
+        if len(key) < 32:
+            raise ValueError("Developer access key must contain at least 32 characters")
+        if not email or "@" not in email:
+            raise ValueError("Developer access email must be an email address")
+        self._key = key.encode()
+        self._email = email
+
+    def verify(self, token):
+        if not token or not hmac.compare_digest(str(token).encode(), self._key):
+            raise AccessVerificationError("Loopback developer key is invalid")
+        return AccessIdentity(
+            subject="loopback-developer",
+            email=self._email,
+            issuer="polyptich://loopback-developer",
+            audience="loopback",
+            expires_at=int(time.time()) + 300,
+        )
 
 
 def current_identity():
