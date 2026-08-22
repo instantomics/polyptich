@@ -91,13 +91,15 @@ def render_workspace_document(
   <a class="pt-global-navigation__skip" href="#pt-global-navigation-main">Skip to content</a>
   <div id="pt-global-navigation-shell" data-polyptich-navigation-shell
        data-navigation-url="{escape(navigation_url, quote=True)}">
-    <div class="pt-global-navigation__mobile-controls">
+    <div class="pt-global-navigation__mobile-controls" role="group" aria-label="Page controls">
       <button class="pt-global-navigation__toggle btn btn-light" type="button"
               aria-controls="pt-global-navigation-sidebar"
-              aria-expanded="false">Navigation</button>
+              aria-expanded="false" aria-label="Open navigation" title="Navigation"><span aria-hidden="true">☰</span></button>
       <button class="pt-global-navigation__toc-toggle btn btn-light" type="button"
               aria-controls="pt-global-navigation-toc-sidebar"
-              aria-expanded="false" hidden>On this page</button>
+              aria-expanded="false" aria-label="Open table of contents"
+              title="On this page" hidden><span aria-hidden="true">≡</span></button>
+      <div class="pt-global-navigation__page-actions" data-polyptich-mobile-page-actions></div>
     </div>
     <button class="pt-global-navigation__overlay" type="button"
              aria-label="Close navigation" tabindex="-1"></button>
