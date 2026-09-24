@@ -156,6 +156,19 @@
     });
   }
 
+  function initialiseDeleteControls() {
+    document.querySelectorAll("[data-delete-form]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const name = form.dataset.deleteName || "this file";
+        if (!window.confirm("Delete " + name + "? This cannot be undone.")) {
+          event.preventDefault();
+          return;
+        }
+        form.elements.confirmed.value = "yes";
+      });
+    });
+  }
+
   function queueRender(scope) {
     requestAnimationFrame(() => {
       renderVisiblePlotly(scope);
@@ -165,5 +178,6 @@
 
   initialiseTabs();
   initialiseDownloads();
+  initialiseDeleteControls();
   queueRender(document);
 })();

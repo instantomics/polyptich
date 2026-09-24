@@ -16,6 +16,10 @@
 .browser .topbar h1, :where(.report, .overview-shell) .report-header h1 { margin: 0 0 0.35rem; font-size: clamp(1.55rem, 4vw, 2.5rem); }
 :where(.browser, .report, .overview-shell, .error-page) :is(.subtitle, .summary, .muted) { color: #667085; }
 .browser .server-tools { display: flex; align-items: center; justify-content: flex-end; gap: 0.7rem; flex-wrap: wrap; }
+.browser .file-controls { display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; margin: 0.9rem 0; padding: 0.75rem; border: 1px solid #d0d5dd; border-radius: 0.7rem; background: #f8faff; }
+.browser .file-controls label { font-weight: 700; }
+.browser .file-controls input[type="file"] { min-width: min(22rem, 100%); }
+.browser .file-controls button { padding: 0.5rem 0.75rem; border: 1px solid #2554c7; border-radius: 0.55rem; background: #2554c7; color: white; font: inherit; cursor: pointer; }
 .browser .controls { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.9rem 0 1.1rem; }
 .browser .controls input { min-width: min(24rem, 100%); padding: 0.5rem 0.65rem; border: 1px solid #d0d5dd; border-radius: 0.55rem; background: white; color: #162033; }
 .browser .controls button, .browser .button-link { padding: 0.5rem 0.75rem; border: 1px solid #d0d5dd; border-radius: 0.55rem; background: white; color: #162033; text-decoration: none; font: inherit; cursor: pointer; }

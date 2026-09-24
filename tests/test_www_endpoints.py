@@ -147,7 +147,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     regular = auth("reader@example.test")
     assert client.get("/health", headers=regular).status_code == 404
     assert client.post("/restart", headers=regular).status_code == 404
-    assert client.post("/delete/public.txt", headers=regular).status_code == 404
+    assert client.post("/delete/public.txt", headers=regular).status_code == 403
     root_page = client.get("/", headers=regular)
     assert root_page.status_code == 200
     assert "default-src 'self'" in root_page.headers["Content-Security-Policy"]

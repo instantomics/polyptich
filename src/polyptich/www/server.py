@@ -3,6 +3,8 @@ import hashlib
 import ipaddress
 import json
 import os
+import secrets
+import shutil
 import stat
 import sys
 from datetime import datetime
@@ -25,6 +27,7 @@ from flask import (
 )
 
 from .auth import (
+    DASHBOARD_CONTROL,
     DASHBOARD_READ,
     SERVICE_RESTART,
     AccessConfig,
@@ -103,17 +106,27 @@ def create_app(
         POLYPTICH_WWW_HOME_URL=home_url,
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
         POLYPTICH_WWW_ENDPOINT_SCOPES={},
+        POLYPTICH_WWW_FILE_CONTROL_TOKEN=secrets.token_urlsafe(32),
         POLYPTICH_WWW_NAVIGATION=navigation,
         POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
     )
 
     def safe_path(subpath=""):
-        target = (base_dir / subpath).resolve()
+        requested = base_dir / subpath
+        target = requested.resolve()
         if target != base_dir and base_dir not in target.parents:
             abort(403)
-        if _has_symlink(base_dir, target):
+        if _has_symlink(base_dir, requested):
             abort(403)
         return target
+
+    def require_file_control():
+        require_scope(DASHBOARD_CONTROL)
+        token = request.form.get("csrf_token", "")
+        if not secrets.compare_digest(
+            token, app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"]
+        ):
+            abort(403, description="Invalid file-control token")
 
     def read_manifest(path):
         manifest_path = path / "manifest.json"
@@ -228,6 +241,7 @@ def create_app(
                     "size": _format_size(None if is_dir else path.stat().st_size),
                     "modified": _format_mtime(path),
                     "href": _item_href(rel, item_manifest, item_endpoint, is_dir, path),
+                    "delete_href": url_for("delete_item", subpath=rel) if not is_dir else None,
                     "browse_href": url_for("browse", subpath=rel, browse=1)
                     if item_manifest is not None
                     or item_endpoint is not None
@@ -248,6 +262,8 @@ def create_app(
             base_dir=base_dir,
             item_count=len(items),
             query=query,
+            can_manage_files=has_scope(DASHBOARD_CONTROL),
+            file_control_token=app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"],
         )
         return render_workspace_page(
             f"polyptich www: /{subpath}",
@@ -279,6 +295,68 @@ def create_app(
         if target.suffix.casefold() in {".html", ".htm"}:
             return app.response_class(target.read_bytes(), content_type="text/html; charset=utf-8")
         return send_from_directory(base_dir, filename, as_attachment=False)
+
+    @app.post("/upload/", defaults={"subpath": ""})
+    @app.post("/upload/<path:subpath>")
+    def upload_files(subpath):
+        current = safe_path(subpath)
+        if not current.is_dir():
+            abort(404)
+        require_scope(path_scope(current))
+        require_file_control()
+
+        uploads = request.files.getlist("files")
+        if not uploads:
+            abort(400, description="Select at least one file to upload")
+
+        pending = []
+        names = set()
+        for upload in uploads:
+            name = _upload_filename(upload.filename)
+            if name in names:
+                abort(400, description=f"Duplicate upload filename: {name}")
+            names.add(name)
+            target = current / name
+            if target.exists() or target.is_symlink():
+                abort(409, description=f"A file named {name} already exists")
+            pending.append((upload, target))
+
+        created = []
+        try:
+            for upload, target in pending:
+                with target.open("xb") as handle:
+                    created.append(target)
+                    shutil.copyfileobj(upload.stream, handle)
+        except FileExistsError:
+            for target in created:
+                target.unlink(missing_ok=True)
+            abort(409, description="An uploaded filename already exists")
+        except OSError:
+            for target in created:
+                target.unlink(missing_ok=True)
+            raise
+
+        return redirect(url_for("browse", subpath=subpath, browse=1))
+
+    @app.post("/delete/<path:subpath>")
+    def delete_item(subpath):
+        target = safe_path(subpath)
+        if target == base_dir:
+            abort(400, description="The WWW root cannot be deleted")
+        require_scope(path_scope(target))
+        require_file_control()
+        if request.form.get("confirmed") != "yes":
+            abort(400, description="File deletion requires confirmation")
+        if not target.exists():
+            abort(404)
+        if not target.is_file():
+            abort(400, description="Only files can be deleted")
+        target.unlink()
+
+        parent = target.parent.relative_to(base_dir).as_posix()
+        if parent == ".":
+            parent = ""
+        return redirect(url_for("browse", subpath=parent, browse=1))
 
     @app.get("/api/v1/navigation")
     def navigation_tree():
@@ -701,6 +779,12 @@ def _has_symlink(base_dir, target):
         if current.is_symlink():
             return True
     return False
+
+
+def _upload_filename(value):
+    if not value or value in {".", ".."} or "/" in value or "\\" in value or "\x00" in value:
+        abort(400, description="Upload filenames must be non-empty file names")
+    return value
 
 
 def _sort_key(path):
