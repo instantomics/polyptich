@@ -58,6 +58,25 @@ def test_index_html_is_rewritten_when_components_are_added(tmp_path):
     assert read_manifest(report)["assets"] == {}
 
 
+def test_untitled_html_is_unboxed_and_omitted_from_toc(tmp_path):
+    page = Page(tmp_path / "www" / "report", title="Report")
+    section = page.section("QC")
+    section.add_html("untitled content")
+
+    html = (tmp_path / "www" / "report" / "index.html").read_text()
+    assert 'class="component component-html"' in html
+    assert '>html</a>' not in html
+
+
+def test_buttons_are_not_wrapped_in_cards(tmp_path):
+    page = Page(tmp_path / "www" / "report")
+    page.add_button("Open", href="target/")
+
+    html = (tmp_path / "www" / "report" / "index.html").read_text()
+    assert 'class="component component-button"' in html
+    assert '<article class="component card" id="button"' not in html
+
+
 def test_tabs_preserve_insertion_order(tmp_path):
     page = Page(tmp_path / "www" / "report")
     section = page.section("QC")

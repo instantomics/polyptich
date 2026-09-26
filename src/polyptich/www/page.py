@@ -1,11 +1,10 @@
 import json
 import re
 import shutil
-from html import escape
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from uuid import uuid4
-
 
 SCHEMA = "polyptich.www.report"
 SCHEMA_VERSION = 1
@@ -293,7 +292,15 @@ class Page(ComponentContainer):
 
     def _render_toc(self, components, depth=0):
         for component in components:
-            if component.get("type") in {"section", "collapsible", "card", "matplotlib", "plotly", "table", "html"}:
+            if component.get("title") and component.get("type") in {
+                "section",
+                "collapsible",
+                "card",
+                "matplotlib",
+                "plotly",
+                "table",
+                "html",
+            }:
                 css = " class=\"toc-child\"" if depth else ""
                 yield f'<a href="#{escape(component["id"], quote=True)}"{css}>{escape(self._title(component))}</a>'
             yield from self._render_toc(component.get("children", []), depth + 1)
@@ -350,6 +357,10 @@ class Page(ComponentContainer):
                 content = f'<button class="www-button www-button-{variant}" type="button">{label}</button>'
         else:
             content = f'<p>Unsupported component: {escape(str(type))}</p>'
+        if type == "button":
+            return f'<div class="component component-button" id="{id_attr}">{content}</div>'
+        if type == "html" and not component.get("title"):
+            return f'<div class="component component-html" id="{id_attr}">{content}</div>'
         return f'<article class="component card" id="{id_attr}">{heading}{content}</article>'
 
     def _render_tabs(self, component):
