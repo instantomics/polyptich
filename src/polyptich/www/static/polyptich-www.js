@@ -3,6 +3,7 @@
   const renderedTables = new Set();
   const tableCleanups = new Set();
   const requestControllers = new Set();
+  let tableCorePromise = null;
   let active = true;
 
   function unmount() {
@@ -175,6 +176,8 @@
   }
 
   function createTableView(node, rows) {
+    node.classList.remove("table");
+    node.classList.add("data-table");
     const core = window.TableCore;
     const options = normaliseTableOptions(node);
     const configuredColumns = parseJson(node.dataset.columns, []);
@@ -353,9 +356,36 @@
     return () => node.replaceChildren();
   }
 
+  function loadTableCore() {
+    if (window.TableCore) return Promise.resolve();
+    if (tableCorePromise) return tableCorePromise;
+    tableCorePromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/@tanstack/table-core@8.21.3/build/umd/index.production.js";
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Unable to load TanStack Table"));
+      document.head.append(script);
+    });
+    return tableCorePromise;
+  }
+
   function renderVisibleTables(scope) {
-    if (!window.TableCore) return;
-    scope.querySelectorAll(".data-table[data-component-id]").forEach((node) => {
+    const nodes = scope.querySelectorAll(
+      ".data-table[data-component-id], .table[data-component-id]"
+    );
+    if (!nodes.length) return;
+    if (!window.TableCore) {
+      loadTableCore()
+        .then(() => {
+          if (active) renderVisibleTables(scope);
+        })
+        .catch(() => {
+          if (!active) return;
+          nodes.forEach((node) => { node.textContent = "Table is temporarily unavailable"; });
+        });
+      return;
+    }
+    nodes.forEach((node) => {
       const id = node.dataset.componentId;
       if (renderedTables.has(id) || !isVisible(node)) return;
       renderedTables.add(id);

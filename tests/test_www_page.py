@@ -197,3 +197,18 @@ def test_matplotlib_tight_bounds_can_be_overridden(tmp_path):
     )
 
     assert figure.kwargs["bbox_inches"] is None
+
+
+def test_table_script_upgrades_persisted_tabulator_placeholders():
+    script = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyptich"
+        / "www"
+        / "static"
+        / "polyptich-www.js"
+    ).read_text()
+
+    assert '".data-table[data-component-id], .table[data-component-id]"' in script
+    assert 'node.classList.remove("table")' in script
+    assert "function loadTableCore()" in script
