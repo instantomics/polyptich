@@ -73,8 +73,26 @@ class ComponentContainer:
     def add_plotly(self, figure, title=None, config=None):
         return self._add_component(self.page._store_plotly(figure, title, config))
 
-    def add_table(self, dataframe, title=None, visible_columns=None):
-        return self._add_component(self.page._store_table(dataframe, title, visible_columns))
+    def add_table(
+        self,
+        dataframe,
+        title=None,
+        visible_columns=None,
+        options=None,
+        column_options=None,
+    ):
+        """Add an interactive TanStack table.
+
+        ``options`` supports ``pagination``, ``page_size``, ``page_size_options``,
+        ``searchable``, ``sortable``, ``column_filters``, and ``column_visibility``.
+        Per-column ``label``, ``sortable``, ``filterable``, and ``align`` values can
+        be supplied through ``column_options``.
+        """
+        return self._add_component(
+            self.page._store_table(
+                dataframe, title, visible_columns, options or {}, column_options or {}
+            )
+        )
 
     def add_html(self, html, title=None):
         return self._add_component({"type": "html", "title": title, "html": str(html)})
@@ -196,7 +214,7 @@ class Page(ComponentContainer):
         if suffix not in {"svg", "png"}:
             raise ValueError("Matplotlib format must be 'svg' or 'png'.")
         asset = self._asset_name(title or "figure", suffix)
-        kwargs = {"transparent": True, **savefig_kwargs}
+        kwargs = {"transparent": True, "bbox_inches": "tight", **savefig_kwargs}
         figure.savefig(self.assets_path / asset, format=suffix, **kwargs)
         if close:
             try:
@@ -216,7 +234,7 @@ class Page(ComponentContainer):
         (self.assets_path / asset).write_text(plotly.io.to_json(figure, validate=True))
         return {"type": "plotly", "title": title, "asset": asset, "config": config or {}}
 
-    def _store_table(self, dataframe, title, visible_columns):
+    def _store_table(self, dataframe, title, visible_columns, options, column_options):
         _import_optional("pyarrow", "parquet-backed dataframe tables")
         asset = self._asset_name(title or "table", "parquet")
         table = dataframe.reset_index()
@@ -231,6 +249,8 @@ class Page(ComponentContainer):
             "asset": asset,
             "columns": list(table.columns),
             "visible_columns": visible_columns,
+            "options": options,
+            "column_options": column_options,
         }
 
     def _iter_ids(self, components):
@@ -251,7 +271,17 @@ class Page(ComponentContainer):
                     key: value
                     for key, value in component.items()
                     if key
-                    in {"type", "title", "asset", "format", "config", "columns", "visible_columns"}
+                    in {
+                        "type",
+                        "title",
+                        "asset",
+                        "format",
+                        "config",
+                        "columns",
+                        "visible_columns",
+                        "options",
+                        "column_options",
+                    }
                 }
             assets.update(self._asset_manifest(component.get("children", [])))
             for tab in component.get("tabs", []):
@@ -272,16 +302,13 @@ class Page(ComponentContainer):
       {body}
     </div>"""
         body_end = """  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" data-polyptich-script="once"></script>
-  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js" data-polyptich-script="once"></script>
+  <script src="https://unpkg.com/@tanstack/table-core@8.21.3/build/umd/index.production.js" data-polyptich-script="once"></script>
   <script src="/static/polyptich-www.js"></script>"""
         return render_workspace_document(
             title,
             content,
             navigation_id=self.manifest.get("navigation_id"),
-            stylesheets=[
-                "https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css",
-                "/static/polyptich-www.css",
-            ],
+            stylesheets=["/static/polyptich-www.css"],
             body_end_html=body_end,
             main_class="report",
             toc=True,
@@ -317,17 +344,21 @@ class Page(ComponentContainer):
         )
         if type == "matplotlib":
             src = escape(component["asset"], quote=True)
-            content = f'<img class="plot-image" src="{src}" alt="{title}">'
+            content = f'<div class="plot-frame"><img class="plot-image" src="{src}" alt="{title}"></div>'
         elif type == "plotly":
             asset = escape(component["asset"], quote=True)
             config = escape(json.dumps(component.get("config") or {}), quote=True)
-            content = f'<div class="plotly" data-component-id="{id_attr}" data-asset="{asset}" data-config="{config}"></div>'
+            content = f'<div class="plot-frame"><div class="plotly" data-component-id="{id_attr}" data-asset="{asset}" data-config="{config}"></div></div>'
         elif type == "table":
             columns = escape(json.dumps(component.get("columns") or []), quote=True)
             visible = escape(json.dumps(component.get("visible_columns")), quote=True)
+            options = escape(json.dumps(component.get("options") or {}), quote=True)
+            column_options = escape(json.dumps(component.get("column_options") or {}), quote=True)
             content = (
                 f'<div><div class="table-actions"><a data-table-download="{id_attr}" href="#">Download Excel</a></div>'
-                f'<div class="table" data-component-id="{id_attr}" data-columns="{columns}" data-visible-columns="{visible}"></div></div>'
+                f'<div class="data-table" data-component-id="{id_attr}" data-columns="{columns}" '
+                f'data-visible-columns="{visible}" data-options="{options}" '
+                f'data-column-options="{column_options}"></div></div>'
             )
         elif type == "html":
             content = f"<div>{component.get('html') or ''}</div>"
@@ -345,7 +376,7 @@ class Page(ComponentContainer):
             return f'<div class="component component-button" id="{id_attr}">{content}</div>'
         if type == "html" and not component.get("title"):
             return f'<div class="component component-html" id="{id_attr}">{content}</div>'
-        return f'<article class="component card" id="{id_attr}">{heading}{content}</article>'
+        return f'<article class="component card component-{type}" id="{id_attr}">{heading}{content}</article>'
 
     def _render_tabs(self, component):
         id_attr = escape(component.get("id", ""), quote=True)

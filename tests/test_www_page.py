@@ -141,3 +141,59 @@ def test_dataframe_table_writes_parquet_with_index_columns(tmp_path):
     assert component["columns"] == ["cell", "value"]
     assert (tmp_path / "www" / "report" / component["asset"]).exists()
     assert not (tmp_path / "www" / "report" / "assets").exists()
+
+
+def test_dataframe_table_writes_tanstack_configuration(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+
+    page = Page(tmp_path / "www" / "report")
+    page.add_table(
+        pd.DataFrame({"cell": ["a"], "score": [1.5]}),
+        visible_columns=["cell"],
+        options={"page_size": 10, "searchable": False},
+        column_options={"score": {"label": "Score", "align": "right"}},
+    )
+
+    report = tmp_path / "www" / "report"
+    component = read_manifest(report)["assets"]["table"]
+    assert component["options"] == {"page_size": 10, "searchable": False}
+    assert component["column_options"] == {
+        "score": {"label": "Score", "align": "right"}
+    }
+    html = (report / "index.html").read_text()
+    assert "@tanstack/table-core@8.21.3" in html
+    assert "tabulator" not in html.lower()
+    assert 'class="data-table"' in html
+    assert 'data-options="{&quot;page_size&quot;: 10, &quot;searchable&quot;: false}"' in html
+
+
+def test_matplotlib_defaults_to_tight_bounds(tmp_path):
+    class Figure:
+        def __init__(self):
+            self.kwargs = None
+
+        def savefig(self, _path, **kwargs):
+            self.kwargs = kwargs
+
+    figure = Figure()
+    Page(tmp_path / "www" / "report").add_matplotlib(figure, close=False)
+
+    assert figure.kwargs["bbox_inches"] == "tight"
+    assert figure.kwargs["transparent"] is True
+
+
+def test_matplotlib_tight_bounds_can_be_overridden(tmp_path):
+    class Figure:
+        def __init__(self):
+            self.kwargs = None
+
+        def savefig(self, _path, **kwargs):
+            self.kwargs = kwargs
+
+    figure = Figure()
+    Page(tmp_path / "www" / "report").add_matplotlib(
+        figure, close=False, bbox_inches=None
+    )
+
+    assert figure.kwargs["bbox_inches"] is None
