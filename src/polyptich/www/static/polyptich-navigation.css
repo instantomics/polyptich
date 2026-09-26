@@ -328,10 +328,76 @@ body[data-polyptich-navigation-host] {
   letter-spacing: 0.04em;
 }
 
+#pt-global-navigation-shell .pt-global-navigation__toc-search {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0.4rem 0.65rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search label {
+  color: var(--pt-nav-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--pt-nav-border);
+  border-radius: var(--bs-border-radius);
+  background: var(--pt-nav-surface);
+  color: var(--pt-nav-text);
+  font: inherit;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search-clear {
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--pt-nav-border);
+  border-radius: var(--bs-border-radius);
+  background: var(--pt-nav-surface);
+  color: var(--pt-nav-link);
+  cursor: pointer;
+  font: 700 0.75rem/1 var(--bs-body-font-family);
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search-clear[hidden] {
+  display: none;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc-search-status {
+  min-height: 1.1em;
+  margin: 0;
+  color: var(--pt-nav-muted);
+  font-size: 0.72rem;
+}
+
 #pt-global-navigation-shell .pt-global-navigation__toc a {
   display: block;
   padding-block: 0.22rem;
   font-size: 0.83rem;
+}
+
+#pt-global-navigation-shell .pt-global-navigation__toc a[aria-current="location"] {
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary-text-emphasis);
+  font-weight: 750;
+  box-shadow: inset 3px 0 0 var(--bs-primary);
+}
+
+#pt-global-navigation-shell :is(
+  a,
+  button,
+  input,
+  [tabindex]
+):focus-visible {
+  outline: 3px solid var(--pt-nav-link);
+  outline-offset: 2px;
 }
 
 #pt-global-navigation-shell .pt-global-navigation__toc-level-3 a {
@@ -543,5 +609,31 @@ body[data-polyptich-navigation-host] .notebook-report .anchor-link:focus {
   #pt-global-navigation-shell .pt-global-navigation__toc-sidebar,
   #pt-global-navigation-shell .pt-global-navigation__disclosure::before {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  #pt-global-navigation-shell .pt-global-navigation__link[aria-current="page"],
+  #pt-global-navigation-shell .pt-global-navigation__toc a[aria-current="location"] {
+    border-left: 3px solid CanvasText;
+    box-shadow: none;
+  }
+
+  #pt-global-navigation-shell :is(a, button, input, [tabindex]):focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+@media print {
+  #pt-global-navigation-shell,
+  #pt-global-navigation-shell .pt-global-navigation__mobile-controls,
+  #pt-global-navigation-shell .pt-global-navigation__overlay,
+  #pt-global-navigation-shell.pt-global-navigation--loading::after,
+  #pt-global-navigation-shell::after {
+    display: none !important;
+  }
+
+  body[data-polyptich-navigation-host] {
+    margin: 0 !important;
   }
 }

@@ -7,7 +7,14 @@ import polyptich as pp
 import polyptich.www as www
 
 
-page = www.Page(pp.paths.get_www() / "my_report", title="My Analysis")
+page = www.Page(
+    pp.paths.get_www() / "my_report",
+    title="My Analysis",
+    author="Analysis team",
+    breadcrumbs=[("Examples", "/browse"), ("My Analysis", None)],
+    provenance={"Dataset": "Example data", "Git commit": "development"},
+    source_url="analysis.ipynb",
+)
 
 qc = page.section("QC")
 
@@ -101,9 +108,29 @@ ax.plot([1, 2, 3], [4, 5, 6])
 plotly_fig = px.scatter(x=[1, 2, 3], y=[4, 5, 6])
 df = pd.DataFrame({"Marker": ["A", "B", "C"] * 100, "Value": [10, 20, 30] * 100})
 
-qc.add_matplotlib(fig, title="Overview")
-qc.add_plotly(plotly_fig, title="Interactive UMAP")
-qc.add_table(df, title="Markers")
+qc.add_matplotlib(
+    fig,
+    title="Overview",
+    caption="A high-resolution figure displayed at its intended physical size.",
+)
+qc.add_plotly(
+    plotly_fig,
+    title="Interactive UMAP",
+    caption="Use fullscreen mode or the Plotly toolbar for closer inspection.",
+)
+qc.add_table(
+    df,
+    title="Markers",
+    options={
+        "page_size": 25,
+        "density": "compact",
+        "pinned_columns": {"left": ["index"]},
+    },
+    column_options={
+        "Marker": {"label": "Marker gene", "width": 180},
+        "Value": {"align": "right", "format": ".1f", "width": 120},
+    },
+)
 
 tabs = qc.tabs("Samples")
 

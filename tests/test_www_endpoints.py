@@ -1,7 +1,9 @@
 import json
 import sys
+from io import BytesIO
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 from flask import jsonify
 
@@ -117,12 +119,15 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     )
     (www / "unsafe-report" / "index.html").write_text("<html><head></head></html>")
 
-    class Frame:
-        def to_excel(self, output, index=False):
-            output.write(b"xlsx-data")
-
     monkeypatch.setattr(
-        server, "_require_pandas", lambda: SimpleNamespace(read_parquet=lambda _: Frame())
+        server,
+        "_require_pandas",
+        lambda: SimpleNamespace(read_parquet=lambda _: pd.DataFrame({"value": ["table"]})),
+    )
+    monkeypatch.setattr(
+        server,
+        "export_dataframe",
+        lambda _frame, _format: (BytesIO(b"xlsx-data"), "application/octet-stream"),
     )
     app = server.create_app(
         tmp_path,
@@ -172,6 +177,14 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert rendered.status_code == 200
     assert rendered.data.count(b"data-polyptich-navigation-shell") == 1
     assert b"<base " not in rendered.data
+    prefixed = client.get(
+        "/report/private/report/",
+        headers=viewer,
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+    assert b'href="/gateway/static/' in prefixed.data
+    assert b'src="/gateway/static/' in prefixed.data
+    assert b'data-navigation-url="/gateway/api/' in prefixed.data
     assert client.get("/report/private/report/plot.json", headers=viewer).data == b'{"data": []}'
     assert client.get("/report-data/private/report/plot", headers=viewer).data == b'{"data": []}'
     download = client.get("/report-download/private/report/table.xlsx", headers=viewer)

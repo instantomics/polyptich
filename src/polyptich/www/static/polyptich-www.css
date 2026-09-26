@@ -46,38 +46,76 @@
 .report-shell .toc a:hover { background: #eef4ff; color: #1d4ed8; }
 .report-shell .toc .toc-child { padding-left: 0.8rem; font-size: 0.93rem; }
 .report-shell .back-link { margin-bottom: 1rem; font-weight: 700; }
-.report { min-width: 0; padding: 1rem clamp(0.75rem, 3vw, 2rem); }
-:where(.report, .overview-shell) .report-header { margin-bottom: 0.75rem; }
+.report { min-width: 0; padding: 1.25rem clamp(0.75rem, 3vw, 2.25rem) 4rem; }
+:where(.report, .overview-shell) .report-header { margin-bottom: 0.65rem; }
 :where(.report, .overview-shell) .component { margin: 0; }
 :where(.report, .overview-shell) .card { background: white; border: 1px solid #e4e7ec; border-radius: 0.15rem; box-shadow: none !important; padding: 0.75rem; overflow: visible; }
 :where(.report, .overview-shell) .linked-card { display: block; color: inherit; text-decoration: none; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
 :where(.report, .overview-shell) .linked-card:hover { border-color: #84adff; box-shadow: none !important; transform: none; }
+.report :where([id]) { scroll-margin-block-start: 1rem; }
+.report .report-breadcrumbs { margin-bottom: 0.8rem; color: #667085; font-size: 0.84rem; }
+.report .report-breadcrumbs ol { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.report .report-breadcrumbs li + li::before { content: "/"; margin-right: 0.35rem; color: #98a2b3; }
+.report .report-toolbar { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1.25rem; }
+.report :is(.report-toolbar, .plot-actions, .table-actions) :is(button, a),
+.report :is(.data-table-toolbar, .data-table-status) button {
+  min-height: 2rem; padding: 0.32rem 0.58rem; border: 1px solid #d0d5dd; border-radius: 0.3rem;
+  background: white; color: #344054; font: inherit; font-size: 0.82rem; text-decoration: none; cursor: pointer;
+}
+.report :is(.report-toolbar, .plot-actions, .table-actions, .data-table-toolbar, .data-table-status) :is(button, a):hover { border-color: #84adff; background: #f5f8ff; color: #1d4ed8; }
+.report :is(button, a, input, select, summary):focus-visible { outline: 3px solid color-mix(in srgb, #2563eb 32%, transparent); outline-offset: 2px; }
+.report .anchor-link { margin-left: 0.18em; color: #98a2b3; font-size: 0.72em; opacity: 0; text-decoration: none; }
+.report :is(h1, h2, h3):hover .anchor-link, .report .anchor-link:focus { opacity: 1; }
 .report .component-title { margin: 0 0 0.45rem; font-size: 1.05rem; color: #344054; }
 .report .component-button { display: inline-block; margin: 0 0.25rem 0.25rem 0; }
-.report .section { margin: 1.25rem 0; }
+.report .section { margin: 1.75rem 0; }
 .report .section > h2 { margin: 0 0 0.45rem; font-size: clamp(1.3rem, 3vw, 1.85rem); }
-.report .section > .card + .card { border-top: 0; }
-.report .collapsible summary { cursor: pointer; font-weight: 700; font-size: 1.2rem; }
-.report :is(.component-matplotlib, .component-plotly) { display: block; }
-.report .plot-frame { width: 100%; overflow: auto; }
-.report .plot-image { display: block; width: auto; max-width: 100%; height: auto; margin: 0; }
-.report .plotly { width: 700px; height: 450px; }
+.report .section > .card + .card { margin-top: 0.6rem; }
+.report .collapsible summary { cursor: pointer; font-weight: 700; font-size: 1.1rem; }
+.report :is(.component-matplotlib, .component-plotly) { display: block; padding-inline: 0; border: 0; background: transparent; }
+.report .report-figure { width: min(var(--plot-width, 700px), 100%); max-width: 100%; margin: 0; }
+.report .report-figure[data-plot-display="full-width"] { width: 100%; }
+.report .plot-frame { position: relative; width: 100%; max-width: 100%; overflow: auto; }
+.report .plot-image { display: block; width: var(--plot-width, auto); max-width: 100%; height: auto; margin: 0; }
+.report .report-figure[data-plot-display="responsive"] .plot-image,
+.report .report-figure[data-plot-display="full-width"] .plot-image { width: 100%; }
+.report .plotly { width: var(--plot-width, 700px); height: var(--plot-height, 450px); max-width: none; }
+.report .report-figure[data-plot-display="responsive"] .plotly { max-width: 100%; }
+.report .plot-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.35rem; }
+.report .report-figure figcaption { max-width: 60rem; margin-top: 0.45rem; color: #667085; font-size: 0.88rem; line-height: 1.45; }
+.report .plot-status { display: grid; min-height: min(var(--plot-height, 18rem), 55vh); place-items: center; color: #667085; background: #f8fafc; }
+.plot-dialog { width: min(96vw, 90rem); max-width: none; height: min(94vh, 64rem); padding: 2.75rem 1rem 1rem; border: 0; border-radius: 0.45rem; background: white; box-shadow: 0 1rem 4rem rgb(16 24 40 / 28%); }
+.plot-dialog::backdrop { background: rgb(15 23 42 / 70%); }
+.plot-dialog-close { position: absolute; top: 0.7rem; right: 0.7rem; }
+.plot-dialog-content { display: grid; width: 100%; height: 100%; place-items: center; overflow: auto; }
+.plot-dialog-content img { max-width: none; }
+.plot-dialog-plot { width: 100%; height: 100%; }
 .report .data-table { min-width: 0; color: #162033; }
+.report .component-table { padding: 0; border: 0; background: transparent; }
 .report .data-table-toolbar { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; margin-bottom: 0.55rem; }
 .report .data-table-search { width: min(20rem, 100%); min-height: 2.15rem; box-sizing: border-box; padding: 0.4rem 0.6rem; border: 1px solid #d0d5dd; border-radius: 0.35rem; color: inherit; background: white; font: inherit; }
 .report .data-table-columns { position: relative; }
 .report .data-table-columns > summary { min-height: 2.15rem; box-sizing: border-box; padding: 0.4rem 0.65rem; border: 1px solid #d0d5dd; border-radius: 0.35rem; background: white; cursor: pointer; list-style: none; }
 .report .data-table-columns > summary::-webkit-details-marker { display: none; }
-.report .data-table-columns-menu { position: absolute; z-index: 4; top: calc(100% + 0.25rem); right: 0; display: grid; min-width: 13rem; max-height: 18rem; overflow: auto; padding: 0.45rem; border: 1px solid #d0d5dd; border-radius: 0.35rem; background: white; box-shadow: 0 0.5rem 1.2rem rgba(16, 24, 40, 0.14); }
+.report .data-table-columns-menu { position: absolute; z-index: 8; top: calc(100% + 0.25rem); right: 0; display: grid; min-width: 18rem; max-height: 22rem; overflow: auto; padding: 0.45rem; border: 1px solid #d0d5dd; border-radius: 0.35rem; background: white; box-shadow: 0 0.5rem 1.2rem rgba(16, 24, 40, 0.14); }
 .report .data-table-columns-menu label { display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem; font-size: 0.9rem; }
+.report .data-table-column-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+.report .data-table-column-control select { max-width: 7rem; }
+.report .data-table-status { min-height: 1.4rem; margin-bottom: 0.35rem; color: #667085; font-size: 0.84rem; }
+.report .data-table-status:empty { display: none; }
 .report .data-table-scroll { width: 100%; overflow: auto; border: 1px solid #d0d5dd; border-radius: 0.25rem; }
-.report .data-table table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.9rem; }
+.report .data-table table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.9rem; }
 .report .data-table :is(th, td) { padding: 0.48rem 0.6rem; border-right: 1px solid #eaecf0; border-bottom: 1px solid #eaecf0; text-align: left; vertical-align: top; white-space: nowrap; }
 .report .data-table :is(th, td):last-child { border-right: 0; }
 .report .data-table tbody tr:last-child td { border-bottom: 0; }
 .report .data-table th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #344054; font-weight: 700; }
 .report .data-table tbody tr:nth-child(even) { background: #fafbfc; }
 .report .data-table tbody tr:hover { background: #eef4ff; }
+.report .data-table-loading tbody { opacity: 0.55; }
+.report .data-table-pinned { z-index: 2; background: white; }
+.report th.data-table-pinned { z-index: 4; background: #f8fafc; }
+.report .data-table-pinned-left { box-shadow: 1px 0 0 #d0d5dd; }
+.report .data-table-pinned-right { box-shadow: -1px 0 0 #d0d5dd; }
 .report .data-table-sort { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-weight: inherit; text-align: left; cursor: pointer; }
 .report .data-table-sort:disabled { cursor: default; }
 .report .data-table-filter { display: block; width: 100%; min-width: 7rem; box-sizing: border-box; margin-top: 0.35rem; padding: 0.25rem 0.35rem; border: 1px solid #d0d5dd; border-radius: 0.25rem; color: #344054; background: white; font: inherit; font-size: 0.8rem; font-weight: 400; }
@@ -89,13 +127,20 @@
 .report .data-table-count { margin-right: auto; }
 .report .data-table-align-center { text-align: center !important; }
 .report .data-table-align-right { text-align: right !important; font-variant-numeric: tabular-nums; }
+.report .data-table[data-density="compact"] :is(th, td) { padding: 0.28rem 0.42rem; font-size: 0.8rem; }
+.report .data-table[data-density="comfortable"] :is(th, td) { padding: 0.7rem 0.78rem; }
 .report .tabs { margin: 0; }
 .report .tab-buttons { display: flex; flex-wrap: wrap; gap: 0.35rem; border-bottom: 1px solid #d0d5dd; }
 .report .tab-button { border: 0; background: transparent; padding: 0.55rem 0.7rem; cursor: pointer; border-radius: 0.15rem 0.15rem 0 0; color: #475467; font: inherit; }
 .report .tab-button.active { background: white; color: #1d4ed8; box-shadow: inset 0 -2px 0 #1d4ed8; }
 .report .tab-panel { display: none; padding-top: 0; }
 .report .tab-panel.active { display: block; }
-.report .table-actions { margin-bottom: 0.35rem; }
+.report .table-actions { display: flex; gap: 0.35rem; justify-content: flex-end; margin-bottom: 0.35rem; }
+.report .report-provenance { max-width: 50rem; margin-top: 2rem; border-top: 1px solid #e4e7ec; padding-top: 0.75rem; color: #475467; font-size: 0.84rem; }
+.report .report-provenance summary { cursor: pointer; font-weight: 700; }
+.report .report-provenance dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.25rem 0.8rem; }
+.report .report-provenance :is(dt, dd) { margin: 0; overflow-wrap: anywhere; }
+.report .report-back-to-top { position: fixed; z-index: 10; right: 1rem; bottom: 1rem; padding: 0.45rem 0.65rem; border: 1px solid #d0d5dd; border-radius: 999px; background: white; color: #344054; box-shadow: 0 0.25rem 0.8rem rgb(16 24 40 / 12%); cursor: pointer; }
 .www-button-secondary { background: var(--pt-surface); border-color: var(--pt-border-strong); color: var(--pt-text); }
 .www-button-subtle { background: #eef4ff; color: #1d4ed8; }
 .www-badge-warning { background: #fef0c7; color: #b54708; }
@@ -157,6 +202,12 @@
   .browser .right { text-align: left; }
   .browser .mobile-label::before { content: attr(data-label) ": "; color: #667085; }
   .www-grid-2, .www-grid-3 { grid-template-columns: 1fr; }
+  .report .report-toolbar { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.2rem; }
+  .report .data-table-pagination { justify-content: flex-start; }
+  .report .data-table-count { flex-basis: 100%; }
+  .report .data-table-pagination button { padding-inline: 0.38rem; }
+  .report .report-provenance dl { grid-template-columns: 1fr; }
+  .report .report-provenance dd + dt { margin-top: 0.35rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -168,4 +219,23 @@
   :where(.report, .overview-shell) .linked-card:hover {
     transform: none;
   }
+}
+
+@media (forced-colors: active) {
+  .report .anchor-link { opacity: 1; }
+  .report .data-table-pinned { border-inline: 1px solid CanvasText; }
+}
+
+@media print {
+  .report { padding: 0; }
+  .report :is(.report-toolbar, .plot-actions, .table-actions, .data-table-toolbar,
+    .data-table-pagination, .report-back-to-top) { display: none !important; }
+  .report :is(.card, .component-table, .component-matplotlib, .component-plotly) {
+    break-inside: avoid; border-color: #bbb; box-shadow: none !important;
+  }
+  .report .tab-panel { display: block !important; }
+  .report .tab-panel[hidden] { display: block !important; }
+  .report .plot-frame, .report .data-table-scroll { overflow: visible; }
+  .report .data-table table { width: 100%; font-size: 7pt; }
+  .report .report-provenance { display: block; }
 }

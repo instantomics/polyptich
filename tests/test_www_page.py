@@ -111,8 +111,8 @@ def test_tab_script_supports_roving_keyboard_navigation_and_persisted_selection(
 
     for key in ["ArrowLeft", "ArrowRight", "Home", "End"]:
         assert f'"{key}"' in script
-    assert "button.tabIndex = active ? 0 : -1" in script
-    assert "panel.hidden = !active" in script
+    assert "button.tabIndex = selected ? 0 : -1" in script
+    assert "panel.hidden = !selected" in script
     assert "history.replaceState(history.state" in script
 
 
@@ -139,6 +139,9 @@ def test_dataframe_table_writes_parquet_with_index_columns(tmp_path):
     component = manifest["assets"]["cells"]
     assert component["type"] == "table"
     assert component["columns"] == ["cell", "value"]
+    assert component["row_count"] == 2
+    assert component["uncompressed_bytes"] > 0
+    assert component["column_types"] == {"cell": "string", "value": "integer"}
     assert (tmp_path / "www" / "report" / component["asset"]).exists()
     assert not (tmp_path / "www" / "report" / "assets").exists()
 
@@ -212,3 +215,110 @@ def test_table_script_upgrades_persisted_tabulator_placeholders():
     assert '".data-table[data-component-id], .table[data-component-id]"' in script
     assert 'node.classList.remove("table")' in script
     assert "function loadTableCore()" in script
+
+
+def test_report_renders_navigation_provenance_and_permalinks(tmp_path):
+    page = Page(
+        tmp_path / "www" / "report",
+        title="Analysis",
+        author="Ada",
+        breadcrumbs=[("Project", "/project"), ("Analysis", None)],
+        provenance={"Git commit": "abc123"},
+        source_url="analysis.ipynb",
+        previous={"label": "QC", "href": "../qc/"},
+        next={"label": "Markers", "href": "../markers/"},
+    )
+    page.section("Results").add_html("ok", title="Summary")
+
+    html = (tmp_path / "www" / "report" / "index.html").read_text()
+    assert '<nav class="report-breadcrumbs" aria-label="Breadcrumb">' in html
+    assert '<header class="report-header" id="report-title">' in html
+    assert 'class="anchor-link" href="#results"' in html
+    assert 'aria-label="Report tools"' in html
+    assert 'class="report-previous" href="../qc/">QC</a>' in html
+    assert 'class="report-next" href="../markers/">Markers</a>' in html
+    assert 'class="report-source" href="analysis.ipynb">Source</a>' in html
+    assert "Report provenance" in html
+    assert "Git commit</dt><dd>abc123" in html
+    assert '<a href="manifest.json">manifest.json</a>' in html
+
+
+def test_matplotlib_stores_dpi_independent_display_dimensions(tmp_path):
+    pyplot = pytest.importorskip("matplotlib.pyplot")
+    figure, axis = pyplot.subplots(figsize=(4, 2))
+    axis.plot([0, 1], [0, 1])
+
+    page = Page(tmp_path / "www" / "report")
+    component = page.add_matplotlib(
+        figure,
+        title="Small plot",
+        format="png",
+        dpi=200,
+        caption="A caption",
+    )
+
+    display = component["display"]
+    assert display["mode"] == "intrinsic"
+    assert display["pixel_width"] > display["width_css_px"]
+    assert display["width_css_px"] == pytest.approx(
+        display["pixel_width"] / 200 * 96,
+        abs=0.01,
+    )
+    manifest_component = read_manifest(tmp_path / "www" / "report")["assets"]["small-plot"]
+    assert manifest_component["caption"] == "A caption"
+    assert manifest_component["downloads"][0]["format"] == "png"
+    html = (tmp_path / "www" / "report" / "index.html").read_text()
+    assert 'data-plot-display="intrinsic"' in html
+    assert "Fullscreen" in html
+    assert "Download PNG" in html
+    assert "<figcaption>A caption</figcaption>" in html
+
+
+def test_table_rejects_unknown_configuration_columns(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    page = Page(tmp_path / "www" / "report")
+
+    with pytest.raises(ValueError, match="Unknown visible table columns"):
+        page.add_table(pd.DataFrame({"value": [1]}), visible_columns=["missing"])
+
+
+def test_table_normalizes_legacy_large_page_sizes(tmp_path):
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    page = Page(tmp_path / "www" / "report")
+    page.add_table(pd.DataFrame({"value": [1]}), options={"page_size": 5000})
+
+    component = read_manifest(tmp_path / "www" / "report")["assets"]["table"]
+    assert component["options"]["page_size"] == 1000
+
+
+def test_plot_display_mode_is_validated(tmp_path):
+    class Figure:
+        dpi = 100
+
+        def savefig(self, path, **_kwargs):
+            Path(path).write_text('<svg width="72pt" height="72pt"></svg>')
+
+    with pytest.raises(ValueError, match="Plot display"):
+        Page(tmp_path / "www" / "report").add_matplotlib(
+            Figure(), close=False, display="huge"
+        )
+
+
+def test_report_script_preserves_combined_fragment_state_and_prefixes():
+    script = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyptich"
+        / "www"
+        / "static"
+        / "polyptich-www.js"
+    ).read_text()
+
+    assert 'const reportScriptUrl = document.currentScript?.src || ""' in script
+    assert 'const suffix = "/static/polyptich-www.js"' in script
+    assert 'params.set("open", ids.join(","))' in script
+    assert 'window.addEventListener("polyptich:report-reveal", revealTarget)' in script
+    assert "tableUrlAppliers.forEach((apply) => apply())" in script
+    assert 'filterFn: "polyptich"' in script
