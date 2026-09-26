@@ -1,10 +1,12 @@
 import json
 import shutil
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
-from flask import jsonify, redirect, request
+from flask import jsonify, redirect, request, url_for
 
+from .document import json_script_value, render_workspace_page
 
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 OVERVIEW_ENDPOINT_ID = "polyptich.overview-grid"
@@ -25,6 +27,7 @@ class OverviewGrid:
         page_size=24,
         overwrite=True,
         required_scope=None,
+        navigation_id=None,
     ):
         self.path = Path(path)
         self.manifest_path = self.path / "manifest.json"
@@ -50,9 +53,13 @@ class OverviewGrid:
         }
         if required_scope is not None:
             self.manifest["required_scope"] = required_scope
+        if navigation_id is not None:
+            self.manifest["navigation_id"] = navigation_id
         self.write()
 
-    def add_item(self, title, href, description=None, media=None, badges=None, values=None, **extra):
+    def add_item(
+        self, title, href, description=None, media=None, badges=None, values=None, **extra
+    ):
         item = {
             "title": title,
             "href": href,
@@ -88,40 +95,38 @@ class OverviewGridEndpoint:
         return redirect(request.path.rstrip("/") + "/")
 
     def index(self):
-        title = _escape(self.manifest.get("title") or self.path.name)
+        title = str(self.manifest.get("title") or self.path.name)
+        title_html = escape(title)
         description = self.manifest.get("description")
-        subtitle = f'<p class="subtitle">{_escape(description)}</p>' if description else ""
-        config = json.dumps(
+        subtitle = f'<p class="subtitle">{escape(str(description))}</p>' if description else ""
+        config = json_script_value(
             {
-                "title": self.manifest.get("title") or self.path.name,
+                "title": title,
                 "filters": self.manifest.get("filters", []),
                 "sorts": self.manifest.get("sorts", []),
                 "pageSize": self.manifest.get("page_size", 24),
             }
         )
-        return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  <link rel="stylesheet" href="/static/polyptich-www.css">
-</head>
-<body>
-  <main class="overview-shell">
-    <header class="report-header">
-      <h1>{title}</h1>
+        content = f"""    <header class="report-header">
+      <h1>{title_html}</h1>
       {subtitle}
     </header>
     <section class="overview-controls" id="overview-controls"></section>
     <div class="overview-summary" id="overview-summary"></div>
     <section class="overview-grid" id="overview-grid"></section>
-    <button class="www-button www-button-secondary overview-load" id="overview-load" type="button">Load more</button>
-  </main>
-  <script id="polyptich-overview-config" type="application/json">{config}</script>
-  <script src="/static/polyptich-overview.js"></script>
-</body>
-</html>"""
+    <button class="www-button www-button-secondary overview-load"
+            id="overview-load" type="button">Load more</button>"""
+        body_end = f"""  <script id="polyptich-overview-config" type="application/json">{config}</script>
+  <script src="{url_for("static_files", filename="polyptich-overview.js")}"></script>"""
+        return render_workspace_page(
+            title,
+            content,
+            navigation_id=self.manifest.get("navigation_id"),
+            stylesheets=[url_for("static_files", filename="polyptich-www.css")],
+            body_end_html=body_end,
+            main_class="overview-shell",
+            toc=False,
+        )
 
     def items(self):
         items = self._load_items()
@@ -130,7 +135,14 @@ class OverviewGridEndpoint:
         total = len(items)
         limit = _int_arg("limit", self.manifest.get("page_size", 24))
         offset = _int_arg("offset", 0)
-        return jsonify({"items": items[offset : offset + limit], "total": total, "offset": offset, "limit": limit})
+        return jsonify(
+            {
+                "items": items[offset : offset + limit],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+            }
+        )
 
     def _load_items(self):
         try:
@@ -196,9 +208,3 @@ def _int_arg(name, default):
         return max(0, int(request.args.get(name, default)))
     except (TypeError, ValueError):
         return default
-
-
-def _escape(value):
-    import html
-
-    return html.escape(str(value), quote=True)

@@ -5,8 +5,12 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from polyptich.www import AccessConfig, CloudflareAccessVerifier
-from polyptich.www.auth import AccessVerificationError
+from polyptich.www import (
+    AccessConfig,
+    CloudflareAccessVerifier,
+    LoopbackDeveloperAccessVerifier,
+)
+from polyptich.www.auth import DASHBOARD_CONTROL, AccessVerificationError, scopes_for_email
 
 
 def test_access_verifier_checks_signature_issuer_audience_and_expiry():
@@ -66,3 +70,33 @@ def test_access_configuration_and_app_reject_unauthenticated_setup(tmp_path):
 
     with pytest.raises(ValueError, match="Access configuration or an Access verifier"):
         create_app(tmp_path)
+
+
+def test_loopback_developer_verifier_requires_exact_strong_key():
+    verifier = LoopbackDeveloperAccessVerifier("a" * 64, email="developer@example.test")
+
+    identity = verifier.verify("a" * 64)
+
+    assert identity.email == "developer@example.test"
+    assert identity.issuer == "polyptich://loopback-developer"
+    for token in ("", "b" * 64, "é" * 64):
+        with pytest.raises(AccessVerificationError):
+            verifier.verify(token)
+    with pytest.raises(ValueError, match="at least 32"):
+        LoopbackDeveloperAccessVerifier("short")
+
+
+def test_only_operators_receive_dashboard_control():
+    trusted = scopes_for_email(
+        "trusted@example.test",
+        trusted_viewer_emails=("trusted@example.test",),
+        operator_emails=("operator@example.test",),
+    )
+    operator = scopes_for_email(
+        "operator@example.test",
+        trusted_viewer_emails=("trusted@example.test",),
+        operator_emails=("operator@example.test",),
+    )
+
+    assert DASHBOARD_CONTROL not in trusted
+    assert DASHBOARD_CONTROL in operator

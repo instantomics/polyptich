@@ -1,19 +1,9 @@
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-
-def load_page_class():
-    path = Path(__file__).parents[1] / "src" / "polyptich" / "www" / "page.py"
-    spec = importlib.util.spec_from_file_location("polyptich_www_page", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.Page
-
-
-Page = load_page_class()
+from polyptich.www.page import Page
 
 
 def read_manifest(path):
@@ -34,6 +24,10 @@ def test_page_writes_manifest_immediately(tmp_path):
     html = (report / "index.html").read_text()
     assert 'id="qc"' in html
     assert "<strong>ok</strong>" in html
+    assert html.count("data-polyptich-navigation-shell") == 1
+    assert "/static/polyptich-navigation.css" in html
+    assert "/static/polyptich-navigation.js" in html
+    assert '<aside class="toc">' not in html
 
 
 def test_overwrite_deletes_existing_folder(tmp_path):
@@ -58,14 +52,14 @@ def test_index_html_is_rewritten_when_components_are_added(tmp_path):
     assert read_manifest(report)["assets"] == {}
 
 
-def test_untitled_html_is_unboxed_and_omitted_from_toc(tmp_path):
+def test_untitled_html_is_unboxed_and_has_no_toc_heading(tmp_path):
     page = Page(tmp_path / "www" / "report", title="Report")
     section = page.section("QC")
     section.add_html("untitled content")
 
     html = (tmp_path / "www" / "report" / "index.html").read_text()
     assert 'class="component component-html"' in html
-    assert '>html</a>' not in html
+    assert '<h3 class="component-title">html</h3>' not in html
 
 
 def test_buttons_are_not_wrapped_in_cards(tmp_path):
@@ -87,11 +81,46 @@ def test_tabs_preserve_insertion_order(tmp_path):
     html = (tmp_path / "www" / "report" / "index.html").read_text()
     assert html.index("Sample A") < html.index("Sample B")
     assert 'role="tab"' in html
+    assert (
+        'id="sample-a-tab" type="button" role="tab" aria-selected="true" '
+        'aria-controls="sample-a" tabindex="0" data-tab="sample-a"'
+    ) in html
+    assert (
+        'id="sample-b-tab" type="button" role="tab" aria-selected="false" '
+        'aria-controls="sample-b" tabindex="-1" data-tab="sample-b"'
+    ) in html
+    assert (
+        'class="tab-panel active" id="sample-a" role="tabpanel" '
+        'aria-labelledby="sample-a-tab" tabindex="0"'
+    ) in html
+    assert (
+        'class="tab-panel" id="sample-b" role="tabpanel" '
+        'aria-labelledby="sample-b-tab" tabindex="0" hidden'
+    ) in html
+
+
+def test_tab_script_supports_roving_keyboard_navigation_and_persisted_selection():
+    script = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyptich"
+        / "www"
+        / "static"
+        / "polyptich-www.js"
+    ).read_text()
+
+    for key in ["ArrowLeft", "ArrowRight", "Home", "End"]:
+        assert f'"{key}"' in script
+    assert "button.tabIndex = active ? 0 : -1" in script
+    assert "panel.hidden = !active" in script
+    assert "history.replaceState(history.state" in script
 
 
 def test_cards_can_contain_arbitrary_html_and_links(tmp_path):
     page = Page(tmp_path / "www" / "report")
-    page.add_card('<img src="preview.png" alt="Preview"><p>open me</p>', title="Preview", href="../other/")
+    page.add_card(
+        '<img src="preview.png" alt="Preview"><p>open me</p>', title="Preview", href="../other/"
+    )
 
     html = (tmp_path / "www" / "report" / "index.html").read_text()
     assert '<a class="component card linked-card"' in html

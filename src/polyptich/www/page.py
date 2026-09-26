@@ -6,6 +6,8 @@ from html import escape
 from pathlib import Path
 from uuid import uuid4
 
+from .document import render_workspace_document
+
 SCHEMA = "polyptich.www.report"
 SCHEMA_VERSION = 1
 
@@ -128,6 +130,7 @@ class Page(ComponentContainer):
         author=None,
         overwrite=True,
         required_scope=None,
+        navigation_id=None,
     ):
         self.path = Path(path)
         self.assets_path = self.path
@@ -156,6 +159,8 @@ class Page(ComponentContainer):
             }
             if required_scope is not None:
                 self.manifest["required_scope"] = required_scope
+            if navigation_id is not None:
+                self.manifest["navigation_id"] = navigation_id
             self.components = []
 
         if not hasattr(self, "components"):
@@ -198,7 +203,7 @@ class Page(ComponentContainer):
                 import matplotlib.pyplot as plt
 
                 plt.close(figure)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 -- closing is best-effort cleanup.
                 pass
         return {"type": "matplotlib", "title": title, "asset": asset, "format": suffix}
 
@@ -245,7 +250,8 @@ class Page(ComponentContainer):
                 assets[component["id"]] = {
                     key: value
                     for key, value in component.items()
-                    if key in {"type", "title", "asset", "format", "config", "columns", "visible_columns"}
+                    if key
+                    in {"type", "title", "asset", "format", "config", "columns", "visible_columns"}
                 }
             assets.update(self._asset_manifest(component.get("children", [])))
             for tab in component.get("tabs", []):
@@ -253,59 +259,33 @@ class Page(ComponentContainer):
         return assets
 
     def _render_html(self):
-        title = escape(str(self.manifest.get("title") or self.path.name))
+        title = str(self.manifest.get("title") or self.path.name)
+        title_html = escape(title)
         description = self.manifest.get("description")
-        toc = "\n".join(self._render_toc(self.components))
         body = "\n".join(self._render_components(self.components))
         subtitle = f'<p class="subtitle">{escape(str(description))}</p>' if description else ""
-        return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/static/polyptich-www.css">
-</head>
-<body>
-  <div class="report-shell">
-    <aside class="toc">
-      <a class="back-link" href="/">www</a>
-      <nav id="toc">{toc}</nav>
-    </aside>
-    <main class="report">
-      <header class="report-header">
-        <h1>{title}</h1>
-        {subtitle}
-      </header>
-      <div id="report-root">
-        {body}
-      </div>
-    </main>
-  </div>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
-  <script src="/static/polyptich-www.js"></script>
-</body>
-</html>
-"""
-
-    def _render_toc(self, components, depth=0):
-        for component in components:
-            if component.get("title") and component.get("type") in {
-                "section",
-                "collapsible",
-                "card",
-                "matplotlib",
-                "plotly",
-                "table",
-                "html",
-            }:
-                css = " class=\"toc-child\"" if depth else ""
-                yield f'<a href="#{escape(component["id"], quote=True)}"{css}>{escape(self._title(component))}</a>'
-            yield from self._render_toc(component.get("children", []), depth + 1)
-            for tab in component.get("tabs", []):
-                yield from self._render_toc(tab.get("children", []), depth + 1)
+        content = f"""    <header class="report-header">
+      <h1>{title_html}</h1>
+      {subtitle}
+    </header>
+    <div id="report-root">
+      {body}
+    </div>"""
+        body_end = """  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" data-polyptich-script="once"></script>
+  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js" data-polyptich-script="once"></script>
+  <script src="/static/polyptich-www.js"></script>"""
+        return render_workspace_document(
+            title,
+            content,
+            navigation_id=self.manifest.get("navigation_id"),
+            stylesheets=[
+                "https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css",
+                "/static/polyptich-www.css",
+            ],
+            body_end_html=body_end,
+            main_class="report",
+            toc=True,
+        )
 
     def _render_components(self, components):
         for component in components:
@@ -330,7 +310,11 @@ class Page(ComponentContainer):
         if type == "tabs":
             return self._render_tabs(component)
 
-        heading = f'<h3 class="component-title">{escape(str(component["title"]))}</h3>' if component.get("title") else ""
+        heading = (
+            f'<h3 class="component-title">{escape(str(component["title"]))}</h3>'
+            if component.get("title")
+            else ""
+        )
         if type == "matplotlib":
             src = escape(component["asset"], quote=True)
             content = f'<img class="plot-image" src="{src}" alt="{title}">'
@@ -346,7 +330,7 @@ class Page(ComponentContainer):
                 f'<div class="table" data-component-id="{id_attr}" data-columns="{columns}" data-visible-columns="{visible}"></div></div>'
             )
         elif type == "html":
-            content = f'<div>{component.get("html") or ""}</div>'
+            content = f"<div>{component.get('html') or ''}</div>"
         elif type == "button":
             label = escape(str(component.get("label") or component.get("title") or "Button"))
             variant = escape(str(component.get("variant") or "primary"), quote=True)
@@ -365,17 +349,31 @@ class Page(ComponentContainer):
 
     def _render_tabs(self, component):
         id_attr = escape(component.get("id", ""), quote=True)
-        title = f'<h3 class="component-title">{escape(str(component["title"]))}</h3>' if component.get("title") else ""
+        title = (
+            f'<h3 class="component-title">{escape(str(component["title"]))}</h3>'
+            if component.get("title")
+            else ""
+        )
         buttons = []
         panels = []
         for index, tab in enumerate(component.get("tabs", [])):
             active = " active" if index == 0 else ""
             selected = "true" if index == 0 else "false"
+            tabindex = "0" if index == 0 else "-1"
+            hidden = "" if index == 0 else " hidden"
             tab_id = escape(tab.get("id", ""), quote=True)
+            button_id = f"{tab_id}-tab"
             tab_title = escape(str(tab.get("title") or "Tab"))
-            buttons.append(f'<button class="tab-button{active}" type="button" role="tab" aria-selected="{selected}" data-tab="{tab_id}">{tab_title}</button>')
+            buttons.append(
+                f'<button class="tab-button{active}" id="{button_id}" type="button" '
+                f'role="tab" aria-selected="{selected}" aria-controls="{tab_id}" '
+                f'tabindex="{tabindex}" data-tab="{tab_id}">{tab_title}</button>'
+            )
             panel = "\n".join(self._render_components(tab.get("children", [])))
-            panels.append(f'<div class="tab-panel{active}" id="{tab_id}" role="tabpanel">{panel}</div>')
+            panels.append(
+                f'<div class="tab-panel{active}" id="{tab_id}" role="tabpanel" '
+                f'aria-labelledby="{button_id}" tabindex="0"{hidden}>{panel}</div>'
+            )
         return f'<section class="component tabs" id="{id_attr}">{title}<div class="tab-buttons" role="tablist">{"".join(buttons)}</div><div class="tab-panels">{"".join(panels)}</div></section>'
 
     def _title(self, component):

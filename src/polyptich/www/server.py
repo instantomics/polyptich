@@ -1,29 +1,56 @@
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
+import secrets
+import shutil
+import stat
 import sys
 from datetime import datetime
-from html import escape
 from importlib import metadata
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, abort, g, jsonify, redirect, render_template, request
-from flask import send_file, send_from_directory, url_for
+from flask import (
+    Flask,
+    abort,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    url_for,
+)
 
 from .auth import (
-    REPORTS_READ,
+    DASHBOARD_CONTROL,
+    DASHBOARD_READ,
+    SERVICE_RESTART,
     AccessConfig,
     AccessVerificationError,
     CloudflareAccessVerifier,
+    LoopbackDeveloperAccessVerifier,
     has_scope,
     require_scope,
     scopes_for_email,
 )
+from .document import render_workspace_page
+from .navigation import (
+    COLLECTION_SCHEMA,
+    COLLECTION_SCHEMA_VERSION,
+    directory_has_navigation_content,
+    endpoint_mount_url,
+    endpoint_mount_urls,
+    is_hidden_name,
+    load_navigation,
+    serialize_navigation,
+    serialize_service_restart_action,
+)
 from .page import SCHEMA
-
 
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
@@ -35,22 +62,29 @@ def create_app(
     *,
     access_config=None,
     access_verifier=None,
+    developer_access_verifier=None,
     trusted_proxy=False,
     trusted_viewer_emails=(),
     operator_emails=(),
     endpoint_factories=None,
     external_origin=None,
+    home_url=None,
     restart_callback=None,
 ):
     if access_verifier is None:
-        if access_config is None:
+        if access_config is None and developer_access_verifier is None:
             raise ValueError("Cloudflare Access configuration or an Access verifier is required")
-        access_verifier = CloudflareAccessVerifier(access_config)
+        access_verifier = (
+            CloudflareAccessVerifier(access_config) if access_config is not None else None
+        )
 
     workspace_root = Path(root).resolve()
     base_dir = (workspace_root / "www").resolve()
     external_origin = _validate_external_origin(external_origin)
+    home_url = _validate_home_url(home_url)
     manifests = _read_initial_manifests(base_dir)
+    endpoint_mounts = endpoint_mount_urls(base_dir, manifests)
+    navigation = load_navigation(base_dir, manifests, endpoint_mounts=endpoint_mounts)
 
     app = Flask(__name__, static_folder=None)
     if trusted_proxy:
@@ -69,18 +103,30 @@ def create_app(
         POLYPTICH_WWW_WORKSPACE_ROOT=workspace_root,
         POLYPTICH_WWW_ROOT_PATH=base_dir,
         POLYPTICH_WWW_EXTERNAL_ORIGIN=external_origin,
+        POLYPTICH_WWW_HOME_URL=home_url,
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
-        POLYPTICH_WWW_ENDPOINT_PARENTS={},
         POLYPTICH_WWW_ENDPOINT_SCOPES={},
+        POLYPTICH_WWW_FILE_CONTROL_TOKEN=secrets.token_urlsafe(32),
+        POLYPTICH_WWW_NAVIGATION=navigation,
+        POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
     )
 
     def safe_path(subpath=""):
-        target = (base_dir / subpath).resolve()
+        requested = base_dir / subpath
+        target = requested.resolve()
         if target != base_dir and base_dir not in target.parents:
             abort(403)
-        if _has_symlink(base_dir, target):
+        if _has_symlink(base_dir, requested):
             abort(403)
         return target
+
+    def require_file_control():
+        require_scope(DASHBOARD_CONTROL)
+        token = request.form.get("csrf_token", "")
+        if not secrets.compare_digest(
+            token, app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"]
+        ):
+            abort(403, description="Invalid file-control token")
 
     def read_manifest(path):
         manifest_path = path / "manifest.json"
@@ -115,10 +161,18 @@ def create_app(
     def authenticate_and_authorize():
         if request.endpoint in {"healthz", "readyz"}:
             return None
-        token = request.headers.get("Cf-Access-Jwt-Assertion", "")
         try:
-            identity = access_verifier.verify(token)
-        except AccessVerificationError as error:
+            developer_token = request.headers.get("X-Polyptich-Developer-Key", "")
+            if developer_token and developer_access_verifier is not None:
+                _validate_loopback(request.remote_addr or "")
+                identity = developer_access_verifier.verify(developer_token)
+            elif access_verifier is not None:
+                identity = access_verifier.verify(
+                    request.headers.get("Cf-Access-Jwt-Assertion", "")
+                )
+            else:
+                raise AccessVerificationError("Loopback developer key is missing")
+        except (AccessVerificationError, ValueError) as error:
             return jsonify({"error": "access_denied", "message": str(error)}), 401
         g.polyptich_access_identity = identity
         g.polyptich_access_scopes = scopes_for_email(
@@ -131,7 +185,7 @@ def create_app(
             request.path,
             request.endpoint,
         )
-        require_scope(required or REPORTS_READ)
+        require_scope(required or DASHBOARD_READ)
         return None
 
     @app.get("/healthz")
@@ -148,6 +202,8 @@ def create_app(
     @app.route("/browse/")
     @app.route("/browse/<path:subpath>")
     def browse(subpath=""):
+        if request.path == "/" and home_url is not None:
+            return redirect(_request_local_url(home_url))
         current = safe_path(subpath)
         query = request.args.get("q", "").strip()
         if not current.is_dir():
@@ -159,7 +215,7 @@ def create_app(
             return render_report(subpath)
         endpoint = endpoint_manifest(current)
         if endpoint is not None and request.args.get("browse") != "1":
-            return redirect(_endpoint_href(subpath))
+            return redirect(_request_local_url(endpoint_mount_url(subpath, endpoint)))
 
         items = []
         for path in sorted(current.iterdir(), key=_sort_key):
@@ -184,9 +240,12 @@ def create_app(
                     "kind": _item_kind(item_manifest, item_endpoint, is_dir, path),
                     "size": _format_size(None if is_dir else path.stat().st_size),
                     "modified": _format_mtime(path),
-                    "href": _item_href(rel, item_manifest, item_endpoint, is_dir),
+                    "href": _item_href(rel, item_manifest, item_endpoint, is_dir, path),
+                    "delete_href": url_for("delete_item", subpath=rel) if not is_dir else None,
                     "browse_href": url_for("browse", subpath=rel, browse=1)
-                    if item_manifest is not None or item_endpoint is not None
+                    if item_manifest is not None
+                    or item_endpoint is not None
+                    or (is_dir and _directory_index(path) is not None)
                     else None,
                 }
             )
@@ -194,7 +253,7 @@ def create_app(
         parent = None
         if current != base_dir:
             parent = current.parent.relative_to(base_dir).as_posix()
-        return render_template(
+        content = render_template(
             "browser.html",
             items=items,
             subpath=subpath,
@@ -203,6 +262,18 @@ def create_app(
             base_dir=base_dir,
             item_count=len(items),
             query=query,
+            can_manage_files=has_scope(DASHBOARD_CONTROL),
+            file_control_token=app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"],
+        )
+        return render_workspace_page(
+            f"polyptich www: /{subpath}",
+            content,
+            stylesheets=[url_for("static_files", filename="polyptich-www.css")],
+            body_end_html=(
+                f'<script src="{url_for("static_files", filename="polyptich-www.js")}"></script>'
+            ),
+            main_class="browser",
+            toc=False,
         )
 
     @app.route("/files/")
@@ -211,24 +282,199 @@ def create_app(
         target = safe_path(filename)
         require_scope(path_scope(target))
         if target.is_dir():
+            if filename and not filename.endswith("/"):
+                return redirect(url_for("download", filename=filename.rstrip("/") + "/"))
+            index = _directory_index(target)
+            if index is not None:
+                return app.response_class(
+                    index.read_bytes(), content_type="text/html; charset=utf-8"
+                )
             return browse(filename)
         if not target.exists():
             abort(404)
+        if target.suffix.casefold() in {".html", ".htm"}:
+            return app.response_class(target.read_bytes(), content_type="text/html; charset=utf-8")
         return send_from_directory(base_dir, filename, as_attachment=False)
+
+    @app.post("/upload/", defaults={"subpath": ""})
+    @app.post("/upload/<path:subpath>")
+    def upload_files(subpath):
+        current = safe_path(subpath)
+        if not current.is_dir():
+            abort(404)
+        require_scope(path_scope(current))
+        require_file_control()
+
+        uploads = request.files.getlist("files")
+        if not uploads:
+            abort(400, description="Select at least one file to upload")
+
+        pending = []
+        names = set()
+        for upload in uploads:
+            name = _upload_filename(upload.filename)
+            if name in names:
+                abort(400, description=f"Duplicate upload filename: {name}")
+            names.add(name)
+            target = current / name
+            if target.exists() or target.is_symlink():
+                abort(409, description=f"A file named {name} already exists")
+            pending.append((upload, target))
+
+        created = []
+        try:
+            for upload, target in pending:
+                with target.open("xb") as handle:
+                    created.append(target)
+                    shutil.copyfileobj(upload.stream, handle)
+        except FileExistsError:
+            for target in created:
+                target.unlink(missing_ok=True)
+            abort(409, description="An uploaded filename already exists")
+        except OSError:
+            for target in created:
+                target.unlink(missing_ok=True)
+            raise
+
+        return redirect(url_for("browse", subpath=subpath, browse=1))
+
+    @app.post("/delete/<path:subpath>")
+    def delete_item(subpath):
+        target = safe_path(subpath)
+        if target == base_dir:
+            abort(400, description="The WWW root cannot be deleted")
+        require_scope(path_scope(target))
+        require_file_control()
+        if request.form.get("confirmed") != "yes":
+            abort(400, description="File deletion requires confirmation")
+        if not target.exists():
+            abort(404)
+        if not target.is_file():
+            abort(400, description="Only files can be deleted")
+        target.unlink()
+
+        parent = target.parent.relative_to(base_dir).as_posix()
+        if parent == ".":
+            parent = ""
+        return redirect(url_for("browse", subpath=parent, browse=1))
+
+    @app.get("/api/v1/navigation")
+    def navigation_tree():
+        def can_access(node):
+            required = node.get("_scope")
+            if required is not None and not has_scope(required):
+                return False
+            paths = (
+                node.get("_contributor_path"),
+                node.get("_path"),
+                node.get("_collection_path"),
+            )
+            return all(path is None or has_scope(path_scope(path)) for path in paths)
+
+        payload = serialize_navigation(
+            app.config["POLYPTICH_WWW_NAVIGATION"],
+            can_access=can_access,
+            collection_href=lambda node_id: url_for(
+                "navigation_directory_collection", node_id=node_id
+            ),
+            script_root=request.script_root,
+        )
+        restart_control = app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"]
+        payload["actions"] = []
+        if restart_control is not None and has_scope(SERVICE_RESTART):
+            payload["actions"].append(
+                serialize_service_restart_action(
+                    restart_control,
+                    health_url=url_for("healthz"),
+                    script_root=request.script_root,
+                )
+            )
+        return jsonify(payload)
+
+    @app.get("/api/v1/navigation/collections/<node_id>", defaults={"subpath": ""})
+    @app.get("/api/v1/navigation/collections/<node_id>/<path:subpath>")
+    def navigation_directory_collection(node_id, subpath):
+        node = app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].get(node_id)
+        collection = node.get("collection") if node is not None else None
+        if collection is None or collection.get("type") != "directory":
+            abort(404)
+        collection_root = safe_path(collection["path"])
+        current = (collection_root / subpath).resolve()
+        if current != collection_root and collection_root not in current.parents:
+            abort(403)
+        if _has_symlink(collection_root, current):
+            abort(403)
+        require_scope(path_scope(current))
+        if not current.is_dir():
+            abort(404)
+        query = request.args.get("q", "").strip()
+        if len(query) > 200:
+            abort(400, description="q must not exceed 200 characters")
+        page = _bounded_positive_int_arg("page", 1, maximum=1_000_000)
+        page_size = _bounded_positive_int_arg("page_size", 20, maximum=100)
+
+        visible = {}
+        for path in sorted(current.iterdir(), key=lambda item: item.name.casefold()):
+            if path.is_symlink() or _is_hidden_collection_name(path.name):
+                continue
+            if not has_scope(path_scope(path)):
+                continue
+            item = _directory_navigation_item(
+                path,
+                base_dir,
+                node_id,
+                collection_root=collection_root,
+                can_access=lambda child: has_scope(path_scope(child)),
+            )
+            if item is not None:
+                visible[path.name] = item
+
+        favorite_names = collection.get("favorites", []) if not subpath else []
+        favorites = []
+        for name in favorite_names:
+            item = visible.get(name)
+            if item is not None:
+                favorites.append({**item, "favorite": True})
+        ordinary = [
+            item
+            for name, item in visible.items()
+            if name not in favorite_names
+            and (not query or query.casefold() in item["label"].casefold())
+        ]
+        total = len(ordinary)
+        start = (page - 1) * page_size
+        selected = ordinary[start : start + page_size]
+        return jsonify(
+            {
+                "schema": COLLECTION_SCHEMA,
+                "schema_version": COLLECTION_SCHEMA_VERSION,
+                "items": selected,
+                "favorites": favorites,
+                "page": page,
+                "page_size": page_size,
+                "has_more": start + len(selected) < total,
+                "total": total,
+            }
+        )
 
     @app.route("/report/<path:subpath>")
     def render_report(subpath):
         current = safe_path(subpath)
         require_scope(path_scope(current))
+        if current.is_file():
+            report_root = _report_ancestor(base_dir, current.parent)
+            if report_root is None:
+                abort(404)
+            return send_from_directory(base_dir, current.relative_to(base_dir), as_attachment=False)
         manifest = report_manifest(current)
         if manifest is None:
             abort(404)
+        if not request.path.endswith("/"):
+            return redirect(url_for("render_report", subpath=subpath.rstrip("/") + "/"))
         html = current / "index.html"
         if not html.exists() or html.is_symlink():
             abort(404)
-        base_href = url_for("download", filename=subpath.rstrip("/") + "/")
-        content = html.read_text().replace("<head>", f'<head>\n  <base href="{base_href}">', 1)
-        return app.response_class(content, mimetype="text/html")
+        return app.response_class(html.read_bytes(), content_type="text/html; charset=utf-8")
 
     @app.route("/report-data/<path:subpath>/<component_id>")
     def report_data(subpath, component_id):
@@ -279,34 +525,21 @@ def create_app(
         response = send_from_directory(
             Path(__file__).parent / "static", filename, as_attachment=False
         )
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
         return response
 
     @app.after_request
     def secure_response(response):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' https://cdn.plot.ly https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self'; "
+            "img-src 'self' data: https:; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'",
+        )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Cache-Control", "no-store")
-        if (
-            response.status_code == 200
-            and response.mimetype == "text/html"
-            and not response.is_streamed
-        ):
-            parent = _endpoint_parent_for_request(
-                app.config["POLYPTICH_WWW_ENDPOINT_PARENTS"], request.path
-            )
-            if parent is not None:
-                parent_href = url_for("browse", subpath=parent) if parent else url_for("browse")
-                parent_label = "/" + parent if parent else "/"
-                banner = _endpoint_browser_banner(parent_href, parent_label)
-                content = response.get_data(as_text=True)
-                if "data-endpoint-browser-banner" not in content:
-                    if "<body" in content:
-                        marker = content.find(">", content.find("<body")) + 1
-                        content = content[:marker] + "\n" + banner + content[marker:]
-                    else:
-                        content = banner + content
-                    response.set_data(content)
         return response
 
     @app.errorhandler(404)
@@ -314,8 +547,25 @@ def create_app(
         return render_template("404.html", path=request.path, root_href=url_for("browse")), 404
 
     factories = _discover_endpoint_factories(endpoint_factories)
-    _register_endpoint_manifests(app, base_dir, manifests, factories)
+    _register_endpoint_manifests(app, base_dir, manifests, factories, endpoint_mounts)
     return app
+
+
+def register_service_restart_control(app, *, session_url, restart_url):
+    control = {
+        "session_url": _local_url(session_url, "session_url"),
+        "restart_url": _local_url(restart_url, "restart_url"),
+    }
+    existing = app.config.get("POLYPTICH_WWW_SERVICE_RESTART_CONTROL")
+    if existing is not None and existing != control:
+        raise ValueError("A Polyptich service restart control is already registered")
+    app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"] = control
+
+
+def _local_url(value, name):
+    if not isinstance(value, str) or not value.startswith("/") or value.startswith("//"):
+        raise ValueError(f"Polyptich service restart {name} must be a local absolute URL")
+    return value
 
 
 def _read_initial_manifests(base_dir):
@@ -341,7 +591,9 @@ def _read_manifest(manifest_path):
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Cannot read manifest {manifest_path}: {error}") from error
     if not isinstance(manifest, dict):
-        raise ValueError(f"Manifest {manifest_path} must contain a JSON object")
+        raise ValueError(  # noqa: TRY004 -- persisted manifest validation uses ValueError.
+            f"Manifest {manifest_path} must contain a JSON object"
+        )
     return manifest
 
 
@@ -351,7 +603,7 @@ def _required_scope(base_dir, target):
         relative = target.relative_to(base_dir)
     except ValueError:
         abort(403)
-    scope = REPORTS_READ
+    scope = DASHBOARD_READ
     current = base_dir
     folders = [base_dir]
     parts = relative.parts if target.is_dir() else relative.parts[:-1]
@@ -385,7 +637,7 @@ def _discover_endpoint_factories(explicit):
     return factories
 
 
-def _register_endpoint_manifests(app, base_dir, manifests, factories):
+def _register_endpoint_manifests(app, base_dir, manifests, factories, endpoint_mounts):
     endpoint_index = 0
     for manifest_path, manifest in manifests.items():
         if manifest.get("schema") != ENDPOINT_SCHEMA:
@@ -410,21 +662,48 @@ def _register_endpoint_manifests(app, base_dir, manifests, factories):
             )
         path = manifest_path.parent
         rel = path.relative_to(base_dir).as_posix()
-        parent = path.parent.relative_to(base_dir).as_posix()
-        if parent == ".":
-            parent = ""
         endpoint_index += 1
         endpoint_name = f"polyptich_www_endpoint_{endpoint_index}"
-        mount_url = _endpoint_href(rel).rstrip("/")
+        mount_url = endpoint_mounts[manifest_path].rstrip("/")
         scope = _required_scope(base_dir, path)
-        app.config["POLYPTICH_WWW_ENDPOINT_PARENTS"][_endpoint_href(rel)] = parent
         app.config["POLYPTICH_WWW_ENDPOINT_SCOPES"][endpoint_name] = (mount_url, scope)
         endpoint = factory(path=path, mount_path=rel, manifest=manifest)
         endpoint.register(app, mount_url=mount_url, endpoint_name=endpoint_name)
+        legacy_mount = f"/endpoint/{rel.strip('/')}"
+        if mount_url != legacy_mount:
+            _register_legacy_endpoint_redirect(app, endpoint_name, legacy_mount, mount_url)
+
+
+def _register_legacy_endpoint_redirect(app, endpoint_name, legacy_mount, mount_url):
+    def dispatch(subpath=""):
+        target = f"{request.script_root.rstrip('/')}{mount_url}/{subpath}"
+        if request.query_string:
+            target += f"?{request.query_string.decode('latin-1')}"
+        return redirect(target, code=308)
+
+    app.add_url_rule(
+        legacy_mount,
+        endpoint_name + "_legacy_redirect",
+        dispatch,
+        defaults={"subpath": ""},
+    )
+    app.add_url_rule(
+        legacy_mount + "/",
+        endpoint_name + "_legacy_redirect_slash",
+        dispatch,
+        defaults={"subpath": ""},
+    )
+    app.add_url_rule(
+        legacy_mount + "/<path:subpath>",
+        endpoint_name + "_legacy_redirect_path",
+        dispatch,
+    )
 
 
 def _endpoint_scope_for_request(endpoint_scopes, request_path, endpoint_name):
-    for name, (prefix, scope) in endpoint_scopes.items():
+    for name, (prefix, scope) in sorted(
+        endpoint_scopes.items(), key=lambda item: len(item[1][0]), reverse=True
+    ):
         if endpoint_name and (endpoint_name == name or endpoint_name.startswith(name + "_")):
             return scope
         if request_path == prefix or request_path.startswith(prefix + "/"):
@@ -442,6 +721,25 @@ def _validate_external_origin(origin):
     return normalized
 
 
+def _validate_home_url(value):
+    if value is None:
+        return None
+    if not isinstance(value, str) or value != value.strip() or not value:
+        raise ValueError("Product home URL must be a local absolute path other than root")
+    parsed = urlparse(value)
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
+        or parsed.path == "/"
+        or "\\" in value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError("Product home URL must be a local absolute path other than root")
+    return value
+
+
 def _validate_loopback(host):
     try:
         address = ipaddress.ip_address(host)
@@ -449,6 +747,25 @@ def _validate_loopback(host):
         raise ValueError("Polyptich WWW requires a literal loopback host") from error
     if not address.is_loopback:
         raise ValueError("Polyptich WWW requires a literal loopback host")
+
+
+def _read_developer_key(value):
+    path = Path(value)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ValueError(f"Unable to open developer access key file: {path}") from error
+    with os.fdopen(descriptor, encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Developer access key must be a regular file")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("Developer access key file permissions must be 0600")
+        key = handle.read().strip()
+    if len(key) < 32:
+        raise ValueError("Developer access key must contain at least 32 characters")
+    return key
 
 
 def _has_symlink(base_dir, target):
@@ -462,6 +779,12 @@ def _has_symlink(base_dir, target):
         if current.is_symlink():
             return True
     return False
+
+
+def _upload_filename(value):
+    if not value or value in {".", ".."} or "/" in value or "\\" in value or "\x00" in value:
+        abort(400, description="Upload filenames must be non-empty file names")
+    return value
 
 
 def _sort_key(path):
@@ -495,38 +818,128 @@ def _item_kind(manifest, endpoint, is_dir, path):
     return path.suffix.lower().lstrip(".") or "file"
 
 
-def _item_href(rel, manifest, endpoint, is_dir):
+def _item_href(rel, manifest, endpoint, is_dir, path=None):
     if manifest is not None:
-        return url_for("render_report", subpath=rel)
+        return url_for("render_report", subpath=rel.rstrip("/") + "/")
     if endpoint is not None:
-        return _endpoint_href(rel)
+        return _request_local_url(endpoint_mount_url(rel, endpoint))
     if is_dir:
+        index = _directory_index(path) if path is not None else None
+        if index is not None:
+            return url_for("download", filename=rel.rstrip("/") + "/")
         return url_for("browse", subpath=rel)
     return url_for("download", filename=rel)
 
 
-def _endpoint_href(rel):
-    return "/endpoint/" + rel.strip("/") + "/"
+def _request_local_url(value):
+    return request.script_root.rstrip("/") + value
 
 
-def _endpoint_parent_for_request(endpoint_parents, request_path):
-    path = request_path if request_path.endswith("/") else request_path + "/"
-    for prefix, parent in sorted(
-        endpoint_parents.items(), key=lambda item: len(item[0]), reverse=True
-    ):
-        if path.startswith(prefix):
-            return parent
+def _bounded_positive_int_arg(name, default, *, maximum):
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        abort(400, description=f"{name} must be an integer")
+    if value < 1 or value > maximum:
+        abort(400, description=f"{name} must be between 1 and {maximum}")
+    return value
+
+
+def _directory_navigation_item(
+    path, base_dir, collection_id, *, collection_root, can_access
+):
+    is_directory = path.is_dir()
+    is_html = path.is_file() and path.suffix.casefold() in {".html", ".htm"}
+    if is_directory and not directory_has_navigation_content(path, can_access=can_access):
+        return None
+    if not is_directory and not is_html:
+        return None
+    relative = path.relative_to(base_dir).as_posix()
+    if is_directory:
+        manifest = path / "manifest.json"
+        endpoint = None
+        if manifest.is_file() and not manifest.is_symlink():
+            try:
+                value = _read_manifest(manifest)
+            except ValueError:
+                value = {}
+            if value.get("schema") == ENDPOINT_SCHEMA:
+                endpoint = _request_local_url(endpoint_mount_url(relative, value))
+        index = _directory_index(path)
+        if endpoint is not None:
+            href = endpoint
+        elif index is not None:
+            href = url_for("download", filename=relative.rstrip("/") + "/")
+        else:
+            href = url_for("browse", subpath=relative, browse=1)
+    else:
+        href = url_for("download", filename=relative)
+    digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
+    expandable = is_directory and _directory_has_navigation_children(
+        path, can_access=can_access
+    )
+    item = {
+        "id": f"{collection_id}.item.{digest}",
+        "label": path.name,
+        "type": "collection" if expandable else "page",
+        "href": href,
+        "icon": "folder" if is_directory else "document",
+    }
+    if expandable:
+        child_subpath = path.relative_to(collection_root).as_posix()
+        item["collection"] = {
+            "type": "directory",
+            "href": url_for(
+                "navigation_directory_collection",
+                node_id=collection_id,
+                subpath=child_subpath,
+            ),
+        }
+    return item
+
+
+def _directory_index(path):
+    for name in ("index.html", "index.htm"):
+        index = path / name
+        if index.is_file() and not index.is_symlink():
+            return index
     return None
 
 
-def _endpoint_browser_banner(parent_href, parent_label):
-    return f"""<details class="endpoint-browser-banner" data-endpoint-browser-banner>
-  <summary>Endpoint navigation</summary>
-  <div class="endpoint-browser-banner-body">
-    <span>Parent folder <code>{escape(parent_label)}</code></span>
-    <a class="www-button www-button-secondary" href="{escape(parent_href, quote=True)}">Open in file browser</a>
-  </div>
-</details>"""
+def _is_hidden_collection_name(name):
+    return is_hidden_name(name) or name.casefold() in {"index.html", "index.htm"}
+
+
+def _directory_has_navigation_children(path, *, can_access):
+    try:
+        children = path.iterdir()
+    except OSError:
+        return False
+    for child in children:
+        if child.is_symlink() or _is_hidden_collection_name(child.name) or not can_access(child):
+            continue
+        if child.is_file() and child.suffix.casefold() in {".html", ".htm"}:
+            return True
+        if child.is_dir() and directory_has_navigation_content(child, can_access=can_access):
+            return True
+    return False
+
+
+def _report_ancestor(base_dir, path):
+    current = path
+    while current != base_dir and base_dir in current.parents:
+        manifest = current / "manifest.json"
+        if manifest.is_file() and not manifest.is_symlink():
+            try:
+                if _read_manifest(manifest).get("schema") == SCHEMA:
+                    return current
+            except ValueError:
+                return None
+        current = current.parent
+    return None
 
 
 def _format_size(size):
@@ -542,7 +955,10 @@ def _format_size(size):
 
 
 def _format_mtime(path):
-    return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    # Browser listings intentionally display the server's local wall-clock time.
+    return datetime.fromtimestamp(path.stat().st_mtime).strftime(  # noqa: DTZ006
+        "%Y-%m-%d %H:%M"
+    )
 
 
 def _build_breadcrumbs(subpath):
@@ -570,24 +986,44 @@ def main(argv=None):
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5002")))
     parser.add_argument("--trusted-proxy", action="store_true")
-    parser.add_argument("--access-issuer", required=True)
-    parser.add_argument("--access-audience", required=True)
+    parser.add_argument("--access-issuer")
+    parser.add_argument("--access-audience")
+    parser.add_argument("--developer-key-file")
+    parser.add_argument("--developer-email", default="playwright@localhost")
     parser.add_argument("--trusted-viewer-email", action="append", default=[])
     parser.add_argument("--operator-email", action="append", default=[])
     parser.add_argument("--external-origin")
+    parser.add_argument("--home-url")
     args = parser.parse_args(argv)
 
     _validate_loopback(args.host)
     if not 1 <= args.port <= 65535:
         parser.error("port must be between 1 and 65535")
-    access_config = AccessConfig(issuer=args.access_issuer, audience=args.access_audience)
+    if bool(args.access_issuer) != bool(args.access_audience):
+        parser.error("--access-issuer and --access-audience must be provided together")
+    if not args.access_issuer and not args.developer_key_file:
+        parser.error("Cloudflare Access or --developer-key-file is required")
+    access_config = (
+        AccessConfig(issuer=args.access_issuer, audience=args.access_audience)
+        if args.access_issuer
+        else None
+    )
+    developer_access_verifier = (
+        LoopbackDeveloperAccessVerifier(
+            _read_developer_key(args.developer_key_file), email=args.developer_email
+        )
+        if args.developer_key_file
+        else None
+    )
     app = create_app(
         args.root,
         access_config=access_config,
+        developer_access_verifier=developer_access_verifier,
         trusted_proxy=args.trusted_proxy,
         trusted_viewer_emails=args.trusted_viewer_email,
         operator_emails=args.operator_email,
         external_origin=args.external_origin,
+        home_url=args.home_url,
     )
     from waitress import serve
 

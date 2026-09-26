@@ -1,14 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>polyptich www: /{{ subpath }}</title>
-  <link rel="stylesheet" href="{{ url_for('static_files', filename='polyptich-www.css') }}">
-</head>
-<body>
-  <main class="browser">
-    <div class="topbar">
+<div class="topbar">
       <div>
         <h1>polyptich www: /{{ subpath }}</h1>
         <p class="subtitle">Serving files from <code>{{ base_dir }}</code></p>
@@ -16,13 +6,22 @@
       <div class="server-tools">
         <span class="summary">{{ item_count }} item{% if item_count != 1 %}s{% endif %}</span>
       </div>
-    </div>
+  </div>
 
     <ol class="breadcrumbs">
       {% for crumb in breadcrumbs %}
         <li>{% if not loop.first %}/{% endif %}<a href="{{ url_for('browse', subpath=crumb.path) }}">{{ crumb.label }}</a></li>
       {% endfor %}
     </ol>
+
+    {% if can_manage_files %}
+      <form class="file-controls" method="post" action="{{ url_for('upload_files', subpath=subpath) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ file_control_token }}">
+        <label for="polyptich-file-upload">Upload files</label>
+        <input id="polyptich-file-upload" type="file" name="files" multiple required>
+        <button type="submit">Upload</button>
+      </form>
+    {% endif %}
 
     <form class="controls" method="get">
       <input type="search" name="q" value="{{ query }}" placeholder="Filter files, folders, and reports" aria-label="Filter files, folders, and reports">
@@ -39,12 +38,19 @@
         <thead><tr><th>Name</th><th>Kind</th><th>Actions</th><th class="right">Size</th><th class="right">Modified</th></tr></thead>
         <tbody>
           {% for item in items %}
-            <tr class="row-link" onclick="window.location.href='{{ item.href }}'">
-              <td><span class="icon icon-{{ item.icon }}"></span>{{ item.display_name }}</td>
+            <tr>
+              <td><span class="icon icon-{{ item.icon }}"></span><a href="{{ item.href }}">{{ item.display_name }}</a></td>
               <td>{{ item.kind }}</td>
               <td>
                 {% if item.browse_href %}
-                  <a class="inline-action" href="{{ item.browse_href }}" onclick="event.stopPropagation()">Browse files</a>
+                  <a class="inline-action" href="{{ item.browse_href }}">Browse files</a>
+                {% endif %}
+                {% if can_manage_files and item.delete_href %}
+                  <form class="inline-delete" method="post" action="{{ item.delete_href }}" data-delete-form data-delete-name="{{ item.display_name }}">
+                    <input type="hidden" name="csrf_token" value="{{ file_control_token }}">
+                    <input type="hidden" name="confirmed" value="">
+                    <button type="submit">Delete</button>
+                  </form>
                 {% endif %}
               </td>
               <td class="right mobile-label" data-label="Size">{{ item.size }}</td>
@@ -56,7 +62,3 @@
     {% else %}
       <div class="empty">{% if query %}No items match <code>{{ query }}</code>.{% else %}This directory is empty.{% endif %}</div>
     {% endif %}
-  </main>
-  <script src="{{ url_for('static_files', filename='polyptich-www.js') }}"></script>
-</body>
-</html>

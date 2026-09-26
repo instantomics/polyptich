@@ -23,7 +23,11 @@ def test_thumbnail_card_renders_image_and_badges():
         badges=["PBMC", "v1"],
     )
 
-    assert 'class="component card www-scenario-card linked-card"' in html
+    assert (
+        'class="component card shadow-sm www-scenario-card linked-card text-decoration-none"'
+        in html
+    )
+    assert "badge rounded-pill text-bg-light" in html
     assert 'src="preview.png"' in html
     assert "Dataset A" in html
     assert "Linked card" in html
@@ -44,7 +48,9 @@ def test_panel_progress_and_matrix_helpers_render_expected_structure():
     )
 
     assert "www-panel" in progress
+    assert "card-header" in progress
     assert "www-bar-fill" in progress
     assert "Composition" in progress
     assert "www-matrix-table" in matrix
+    assert "table table-sm" in matrix
     assert "Correlation" in matrix

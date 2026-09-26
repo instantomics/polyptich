@@ -2,9 +2,6 @@
 requires = ["setuptools>=41", "wheel", "setuptools_scm[toml]>=6.2", "numpy"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools-git-versioning]
-enabled = true
-
 [project]
 name = "polyptich"
 authors = [
@@ -57,7 +54,14 @@ www = [
 ]
 
 [tool.setuptools.package-data]
-"polyptich.www" = ["templates/*.html", "static/*.css", "static/*.js"]
+"polyptich.www" = [
+    "templates/*.html",
+    "static/*.css",
+    "static/*.js",
+    "static/*.txt",
+    "static/fonts/*.woff",
+    "static/fonts/*.woff2",
+]
 
 [tool.setuptools_scm]
 

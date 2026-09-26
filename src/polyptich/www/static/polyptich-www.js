@@ -1,6 +1,24 @@
 (function () {
   const renderedPlotly = new Set();
   const renderedTables = new Set();
+  const tables = new Set();
+  const requestControllers = new Set();
+  let active = true;
+
+  function unmount() {
+    if (!active) return;
+    active = false;
+    window.removeEventListener("polyptich:before-page-swap", unmount);
+    requestControllers.forEach((controller) => controller.abort());
+    requestControllers.clear();
+    tables.forEach((table) => table.destroy());
+    tables.clear();
+    document.querySelectorAll(".plotly[data-component-id]").forEach((node) => {
+      if (window.Plotly) Plotly.purge(node);
+    });
+  }
+
+  window.addEventListener("polyptich:before-page-swap", unmount);
 
   function reportPath() {
     const match = window.location.pathname.match(/^\/report\/(.*)$/);
@@ -28,22 +46,38 @@
     return !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
   }
 
+  function fetchJson(url) {
+    const controller = new AbortController();
+    requestControllers.add(controller);
+    return fetch(url, {signal: controller.signal})
+      .then((response) => response.json())
+      .finally(() => requestControllers.delete(controller));
+  }
+
   function activeTabId(groupId, tabs) {
     const params = new URLSearchParams(location.hash.replace(/^#/, ""));
     const value = params.get("tab-" + groupId);
     return tabs.some((tab) => tab.id === value) ? value : null;
   }
 
-  function activateTab(wrapper, groupId, tabId) {
-    wrapper.querySelectorAll(".tab-button").forEach((button) => {
+  function activateTab(wrapper, groupId, tabId, focus = false) {
+    let activeButton = null;
+    wrapper.querySelectorAll(":scope > .tab-buttons > .tab-button").forEach((button) => {
       const active = button.dataset.tab === tabId;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
+      button.tabIndex = active ? 0 : -1;
+      if (active) activeButton = button;
     });
-    wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+    wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel) => {
+      const active = panel.id === tabId;
+      panel.classList.toggle("active", active);
+      panel.hidden = !active;
+    });
     const params = new URLSearchParams(location.hash.replace(/^#/, ""));
     params.set("tab-" + groupId, tabId);
-    history.replaceState(null, "", "#" + params.toString());
+    history.replaceState(history.state, "", "#" + params.toString());
+    if (focus) activeButton?.focus();
     queueRender(wrapper);
   }
 
@@ -55,11 +89,26 @@
         const active = selected ? button.dataset.tab === selected : index === 0;
         button.classList.toggle("active", active);
         button.setAttribute("aria-selected", active ? "true" : "false");
+        button.tabIndex = active ? 0 : -1;
         button.addEventListener("click", () => activateTab(wrapper, wrapper.id, button.dataset.tab));
+        button.addEventListener("keydown", (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          let targetIndex;
+          if (event.key === "Home") targetIndex = 0;
+          else if (event.key === "End") targetIndex = buttons.length - 1;
+          else {
+            const offset = event.key === "ArrowRight" ? 1 : -1;
+            targetIndex = (buttons.indexOf(button) + offset + buttons.length) % buttons.length;
+          }
+          const target = buttons[targetIndex];
+          if (target) activateTab(wrapper, wrapper.id, target.dataset.tab, true);
+        });
       });
       wrapper.querySelectorAll(":scope > .tab-panels > .tab-panel").forEach((panel, index) => {
         const active = selected ? panel.id === selected : index === 0;
         panel.classList.toggle("active", active);
+        panel.hidden = !active;
       });
     });
   }
@@ -70,9 +119,12 @@
       const id = node.dataset.componentId;
       if (renderedPlotly.has(id) || !isVisible(node)) return;
       renderedPlotly.add(id);
-      fetch(node.dataset.asset || dataUrl(id)).then((r) => r.json()).then((figure) => {
+      fetchJson(node.dataset.asset || dataUrl(id)).then((figure) => {
+        if (!active) return;
         const config = Object.assign({ displaylogo: false, responsive: true }, parseJson(node.dataset.config, {}));
         Plotly.newPlot(node, figure.data || [], figure.layout || {}, config);
+      }).catch((error) => {
+        if (error.name !== "AbortError" && active) node.textContent = "Plot is temporarily unavailable";
       });
     });
   }
@@ -83,14 +135,17 @@
       const id = node.dataset.componentId;
       if (renderedTables.has(id) || !isVisible(node)) return;
       renderedTables.add(id);
-      fetch(dataUrl(id)).then((r) => r.json()).then((rows) => {
+      fetchJson(dataUrl(id)).then((rows) => {
+        if (!active) return;
         const visible = parseJson(node.dataset.visibleColumns, null);
         const configured = parseJson(node.dataset.columns, []);
         const sourceColumns = configured.length ? configured : Object.keys(rows[0] || {});
         const columns = sourceColumns
           .filter((column) => !visible || visible.includes(column))
           .map((column) => ({ title: column, field: column, headerFilter: true }));
-        new Tabulator(node, { data: rows, columns, layout: "fitDataStretch", pagination: true, paginationSize: 25 });
+        tables.add(new Tabulator(node, { data: rows, columns, layout: "fitDataStretch", pagination: true, paginationSize: 25 }));
+      }).catch((error) => {
+        if (error.name !== "AbortError" && active) node.textContent = "Table is temporarily unavailable";
       });
     });
   }
@@ -98,6 +153,19 @@
   function initialiseDownloads() {
     document.querySelectorAll("[data-table-download]").forEach((link) => {
       link.href = downloadUrl(link.dataset.tableDownload);
+    });
+  }
+
+  function initialiseDeleteControls() {
+    document.querySelectorAll("[data-delete-form]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const name = form.dataset.deleteName || "this file";
+        if (!window.confirm("Delete " + name + "? This cannot be undone.")) {
+          event.preventDefault();
+          return;
+        }
+        form.elements.confirmed.value = "yes";
+      });
     });
   }
 
@@ -110,5 +178,6 @@
 
   initialiseTabs();
   initialiseDownloads();
+  initialiseDeleteControls();
   queueRender(document);
 })();

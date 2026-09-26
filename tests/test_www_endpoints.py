@@ -8,12 +8,17 @@ from flask import jsonify
 from polyptich.www import (
     AccessConfig,
     AccessIdentity,
+    LoopbackDeveloperAccessVerifier,
+    OverviewGrid,
     current_identity,
     current_scopes,
+    register_service_restart_control,
+    render_workspace_document,
     require_scope,
+    server,
 )
 from polyptich.www.auth import AccessVerificationError
-from polyptich.www import server
+from polyptich.www.overview import OverviewGridEndpoint
 
 
 class FakeVerifier:
@@ -31,6 +36,44 @@ class FakeVerifier:
 
 def auth(email):
     return {"Cf-Access-Jwt-Assertion": email}
+
+
+def test_loopback_developer_key_authentication_is_loopback_only(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        developer_access_verifier=LoopbackDeveloperAccessVerifier(
+            "a" * 64, email="developer@example.test"
+        ),
+    )
+    client = app.test_client()
+    headers = {"X-Polyptich-Developer-Key": "a" * 64}
+
+    assert client.get("/", headers=headers).status_code == 200
+    assert (
+        client.get(
+            "/", headers=headers, environ_overrides={"REMOTE_ADDR": "192.0.2.1"}
+        ).status_code
+        == 401
+    )
+    assert client.get("/").status_code == 401
+
+
+def test_developer_key_file_requires_exact_private_permissions(tmp_path):
+    key_file = tmp_path / "developer.key"
+    key_file.write_text("a" * 64)
+    key_file.chmod(0o600)
+
+    assert server._read_developer_key(key_file) == "a" * 64
+
+    key_file.chmod(0o640)
+    with pytest.raises(ValueError, match="permissions must be 0600"):
+        server._read_developer_key(key_file)
+    key_file.chmod(0o600)
+    symlink = tmp_path / "developer-link.key"
+    symlink.symlink_to(key_file)
+    with pytest.raises(ValueError, match="Unable to open"):
+        server._read_developer_key(symlink)
 
 
 def write_manifest(path, value):
@@ -59,7 +102,9 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
             },
         },
     )
-    (report / "index.html").write_text("<html><head></head><body>private report</body></html>")
+    (report / "index.html").write_text(
+        render_workspace_document("Private report", "private report")
+    )
     (report / "plot.json").write_text('{"data": []}')
     (report / "table.parquet").write_bytes(b"table")
     write_manifest(
@@ -67,9 +112,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
         {
             "schema": "polyptich.www.report",
             "schema_version": 1,
-            "assets": {
-                "plot": {"type": "plotly", "asset": "../private/report/plot.json"}
-            },
+            "assets": {"plot": {"type": "plotly", "asset": "../private/report/plot.json"}},
         },
     )
     (www / "unsafe-report" / "index.html").write_text("<html><head></head></html>")
@@ -90,17 +133,30 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
 
     assert client.get("/healthz").get_json() == {"status": "ok"}
     assert client.get("/readyz").get_json() == {"status": "ready"}
-    for path in ["/", "/files/public.txt", "/static/polyptich-www.css"]:
+    for path in [
+        "/",
+        "/files/public.txt",
+        "/static/bootstrap-5.3.8.min.css",
+        "/static/bootstrap-5.3.8.bundle.min.js",
+        "/static/bootstrap-icons-1.13.1.min.css",
+        "/static/fonts/bootstrap-icons.woff2",
+        "/static/polyptich-www.css",
+    ]:
         assert client.get(path).status_code == 401
 
     regular = auth("reader@example.test")
     assert client.get("/health", headers=regular).status_code == 404
     assert client.post("/restart", headers=regular).status_code == 404
-    assert client.post("/delete/public.txt", headers=regular).status_code == 404
+    assert client.post("/delete/public.txt", headers=regular).status_code == 403
     root_page = client.get("/", headers=regular)
     assert root_page.status_code == 200
+    assert "default-src 'self'" in root_page.headers["Content-Security-Policy"]
     assert b"public.txt" in root_page.data
     assert b"private/" not in root_page.data
+    assert client.get(
+        "/static/bootstrap-icons-1.13.1.min.css", headers=regular
+    ).status_code == 200
+    assert client.get("/static/fonts/bootstrap-icons.woff2", headers=regular).status_code == 200
     assert client.get("/report-data/unsafe-report/plot", headers=regular).status_code == 403
     for path in [
         "/browse/private",
@@ -112,16 +168,192 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
         assert client.get(path, headers=regular).status_code == 403
 
     viewer = auth("viewer@example.test")
-    rendered = client.get("/report/private/report", headers=viewer)
+    rendered = client.get("/report/private/report/", headers=viewer)
     assert rendered.status_code == 200
-    assert b'<base href="/files/private/report/">' in rendered.data
+    assert rendered.data.count(b"data-polyptich-navigation-shell") == 1
+    assert b"<base " not in rendered.data
+    assert client.get("/report/private/report/plot.json", headers=viewer).data == b'{"data": []}'
     assert client.get("/report-data/private/report/plot", headers=viewer).data == b'{"data": []}'
     download = client.get("/report-download/private/report/table.xlsx", headers=viewer)
     assert download.status_code == 200
     assert download.data == b"xlsx-data"
 
 
-def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path):
+def test_navigation_exposes_registered_restart_action_only_to_operators(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        operator_emails=["operator@example.test"],
+    )
+    register_service_restart_control(
+        app,
+        session_url="/endpoint/agent/api/v1/session",
+        restart_url="/endpoint/agent/api/v1/service/restart",
+    )
+    client = app.test_client()
+
+    viewer = client.get(
+        "/api/v1/navigation", headers=auth("viewer@example.test")
+    ).get_json()
+    operator = client.get(
+        "/api/v1/navigation",
+        headers=auth("operator@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    ).get_json()
+
+    assert viewer["actions"] == []
+    assert operator["actions"] == [
+        {
+            "id": "service.restart",
+            "type": "service_restart",
+            "label": "Restart server",
+            "session_url": "/gateway/endpoint/agent/api/v1/session",
+            "restart_url": "/gateway/endpoint/agent/api/v1/service/restart",
+            "health_url": "/gateway/healthz",
+        }
+    ]
+
+
+def test_overview_endpoint_uses_workspace_document(tmp_path):
+    OverviewGrid(tmp_path / "www" / "overview", title="Datasets", navigation_id="datasets")
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        endpoint_factories={"polyptich.overview-grid": OverviewGridEndpoint},
+    )
+
+    response = app.test_client().get("/endpoint/overview/", headers=auth("reader@example.test"))
+
+    assert response.status_code == 200
+    assert response.data.count(b"data-polyptich-navigation-shell") == 1
+    assert b"polyptich-navigation.css" in response.data
+    assert b"polyptich-overview.js" in response.data
+    assert b'"navigation_id":"datasets"' in response.data
+
+
+def test_endpoint_contributions_require_destination_and_collection_source_scope(tmp_path):
+    www = tmp_path / "www"
+    www.mkdir()
+    (www / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [{"id": "agent", "label": "Agent", "type": "section"}],
+            }
+        )
+    )
+    write_manifest(
+        www / "public",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.scoped-navigation",
+            "navigation": {
+                "parent_id": "agent",
+                "items": [
+                    {
+                        "id": "private-page",
+                        "label": "Secret page",
+                        "type": "page",
+                        "href": "private/",
+                    },
+                    {
+                        "id": "private-collection",
+                        "label": "Secret collection",
+                        "type": "collection",
+                        "href": ".",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "private/api/v1/navigation/items",
+                            "placeholder": "Find a secret",
+                        },
+                    },
+                    {
+                        "id": "operator-page",
+                        "label": "Operator secret",
+                        "type": "page",
+                        "href": "operator/",
+                        "required_scope": "service.restart",
+                    },
+                ],
+            },
+        },
+    )
+    write_manifest(
+        www / "public" / "private",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.scoped-navigation",
+            "required_scope": "private.read",
+        },
+    )
+
+    class Endpoint:
+        def __init__(self, path, mount_path, manifest):
+            pass
+
+        def register(self, app, mount_url, endpoint_name):
+            app.add_url_rule(mount_url + "/", endpoint_name, lambda: "endpoint")
+
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        trusted_viewer_emails=["viewer@example.test"],
+        operator_emails=["operator@example.test"],
+        endpoint_factories={"tests.scoped-navigation": Endpoint},
+    )
+    client = app.test_client()
+
+    regular = client.get("/api/v1/navigation", headers=auth("reader@example.test"))
+    assert regular.get_json()["items"] == []
+    assert b"Secret page" not in regular.data
+    assert b"Secret collection" not in regular.data
+    assert b"Operator secret" not in regular.data
+
+    trusted = client.get("/api/v1/navigation", headers=auth("viewer@example.test")).get_json()
+    assert [item["id"] for item in trusted["items"][0]["children"]] == [
+        "private-page",
+        "private-collection",
+    ]
+    assert "Operator secret" not in json.dumps(trusted)
+    operator = client.get(
+        "/api/v1/navigation", headers=auth("operator@example.test")
+    ).get_json()
+    assert [item["id"] for item in operator["items"][0]["children"]] == [
+        "private-page",
+        "private-collection",
+        "operator-page",
+    ]
+
+
+def test_trusted_endpoint_factory_gets_context_scope_helpers_and_global_navigation(tmp_path):
+    (tmp_path / "www").mkdir()
+    (tmp_path / "www" / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [
+                    {"id": "agent", "label": "Agent", "type": "section", "icon": "agent"},
+                    {
+                        "id": "global-agent-runs",
+                        "label": "All agent runs",
+                        "type": "collection",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "/endpoint/private/agent/api/v1/navigation/agent-runs",
+                            "placeholder": "Find an agent run",
+                        },
+                    },
+                ],
+            }
+        )
+    )
     write_manifest(
         tmp_path / "www" / "private",
         {"schema": "polyptich.www.folder", "schema_version": 1, "required_scope": "private.read"},
@@ -134,6 +366,22 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
             "schema_version": 1,
             "endpoint_id": "tests.agent",
             "title": "Agent",
+            "navigation": {
+                "parent_id": "agent",
+                "items": [
+                    {
+                        "id": "agent-runs",
+                        "label": "Agent runs",
+                        "type": "collection",
+                        "href": ".",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "api/v1/navigation/agent-runs",
+                            "placeholder": "Find an agent run",
+                        },
+                    }
+                ],
+            },
         },
     )
     observed = {}
@@ -186,8 +434,28 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
     viewer = client.get("/endpoint/private/agent/", headers=auth("viewer@example.test"))
     assert viewer.status_code == 200
     assert b"private.read" in viewer.data
-    assert b"data-endpoint-browser-banner" in viewer.data
-    assert b'href="/browse/private"' in viewer.data
+    assert b"data-polyptich-navigation-shell" not in viewer.data
+    assert b"data-endpoint-browser-banner" not in viewer.data
+    regular_navigation = client.get(
+        "/api/v1/navigation", headers=auth("reader@example.test")
+    ).get_json()
+    assert regular_navigation["items"] == []
+    viewer_navigation = client.get(
+        "/api/v1/navigation", headers=auth("viewer@example.test")
+    ).get_json()
+    contributed = viewer_navigation["items"][0]["children"][0]
+    assert viewer_navigation["items"][0]["icon"] == "agent"
+    assert contributed["href"] == "/endpoint/private/agent/"
+    assert contributed["collection"] == {
+        "type": "endpoint",
+        "href": "/endpoint/private/agent/api/v1/navigation/agent-runs",
+        "placeholder": "Find an agent run",
+    }
+    global_collection = viewer_navigation["items"][1]
+    assert global_collection["id"] == "global-agent-runs"
+    assert global_collection["collection"]["href"] == (
+        "/endpoint/private/agent/api/v1/navigation/agent-runs"
+    )
     assert (
         client.get(
             "/endpoint/private/agent/control", headers=auth("viewer@example.test")
@@ -200,7 +468,7 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
     assert controlled.get_json() == {"controlled_by": "operator@example.test"}
     operator_page = client.get("/endpoint/private/agent/", headers=auth("operator@example.test"))
     for scope in [
-        b"reports.read",
+        b"dashboard.read",
         b"agent.read",
         b"private.read",
         b"agent.control",
@@ -215,6 +483,123 @@ def test_trusted_endpoint_factory_gets_context_scope_helpers_and_banner(tmp_path
     assert observed["restart_callback"] is restart
 
 
+def test_custom_endpoint_mount_drives_routes_navigation_scope_and_proxy_prefix(tmp_path):
+    www = tmp_path / "www"
+    www.mkdir()
+    (www / "navigation.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.navigation",
+                "schema_version": 1,
+                "title": "Iomix",
+                "items": [
+                    {"id": "dashboard", "label": "Dashboard", "type": "section"},
+                    {
+                        "id": "dashboard-items",
+                        "label": "Dashboard items",
+                        "type": "collection",
+                        "collection": {
+                            "type": "endpoint",
+                            "href": "/dashboard/api/items",
+                        },
+                    },
+                ],
+            }
+        )
+    )
+    write_manifest(
+        www / "internal-dashboard",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.dashboard",
+            "mount_url": "/dashboard/",
+            "required_scope": "private.read",
+            "navigation": {
+                "parent_id": "dashboard",
+                "items": [
+                    {
+                        "id": "dashboard-home",
+                        "label": "Dashboard home",
+                        "type": "page",
+                        "href": ".",
+                    }
+                ],
+            },
+        },
+    )
+
+    class DashboardEndpoint:
+        def __init__(self, **_kwargs):
+            pass
+
+        def register(self, app, mount_url, endpoint_name):
+            app.add_url_rule(mount_url + "/", endpoint_name, lambda: "dashboard")
+            app.add_url_rule(mount_url + "/api/items", endpoint_name + "_items", lambda: "items")
+
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        trusted_viewer_emails=["viewer@example.test"],
+        endpoint_factories={"tests.dashboard": DashboardEndpoint},
+    )
+    client = app.test_client()
+
+    assert client.get("/dashboard/", headers=auth("reader@example.test")).status_code == 403
+    assert client.get("/dashboard/", headers=auth("viewer@example.test")).data == b"dashboard"
+    legacy = client.get(
+        "/endpoint/internal-dashboard/api/items?view=current",
+        headers=auth("viewer@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+    assert legacy.status_code == 308
+    assert legacy.headers["Location"] == "/gateway/dashboard/api/items?view=current"
+    redirect = client.get("/browse/internal-dashboard", headers=auth("viewer@example.test"))
+    assert redirect.headers["Location"] == "/dashboard/"
+    navigation = client.get(
+        "/api/v1/navigation",
+        headers=auth("viewer@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    ).get_json()
+    assert navigation["items"][0]["children"][0]["href"] == "/gateway/dashboard/"
+    assert navigation["items"][1]["collection"]["href"] == "/gateway/dashboard/api/items"
+
+
+@pytest.mark.parametrize(
+    "mount_url",
+    ["/", "dashboard/", "/dashboard", "/api/dashboard/", "/dashboard/../admin/", "/dash%2Fboard/"],
+)
+def test_custom_endpoint_mount_rejects_noncanonical_reserved_or_unsafe_urls(tmp_path, mount_url):
+    write_manifest(
+        tmp_path / "www" / "dashboard",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.dashboard",
+            "mount_url": mount_url,
+        },
+    )
+
+    with pytest.raises(ValueError, match="mount_url"):
+        server.create_app(tmp_path, access_verifier=FakeVerifier())
+
+
+def test_custom_endpoint_mount_rejects_conflicts_with_other_endpoints(tmp_path):
+    for directory, mount_url in [("one", "/dashboard/"), ("two", "/dashboard/admin/")]:
+        write_manifest(
+            tmp_path / "www" / directory,
+            {
+                "schema": "polyptich.www.endpoint",
+                "schema_version": 1,
+                "endpoint_id": "tests.dashboard",
+                "mount_url": mount_url,
+            },
+        )
+
+    with pytest.raises(ValueError, match="Endpoint mounts conflict"):
+        server.create_app(tmp_path, access_verifier=FakeVerifier())
+
+
 def test_unknown_endpoint_id_fails_startup_without_importing_a_handler(tmp_path):
     write_manifest(
         tmp_path / "www" / "unknown",
@@ -227,6 +612,77 @@ def test_unknown_endpoint_id_fails_startup_without_importing_a_handler(tmp_path)
 
     with pytest.raises(ValueError, match="Unknown Polyptich WWW endpoint ID 'publisher.unknown'"):
         server.create_app(tmp_path, access_verifier=FakeVerifier(), endpoint_factories={})
+
+
+def test_configured_product_home_redirects_only_root_with_proxy_prefix(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        home_url="/endpoint/dashboard/",
+    )
+    client = app.test_client()
+
+    root = client.get("/", headers=auth("reader@example.test"))
+    prefixed = client.get(
+        "/",
+        headers=auth("reader@example.test"),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+
+    assert root.status_code == 302
+    assert root.headers["Location"] == "/endpoint/dashboard/"
+    assert prefixed.headers["Location"] == "/gateway/endpoint/dashboard/"
+    assert client.get("/browse/", headers=auth("reader@example.test")).status_code == 200
+    assert client.get(
+        "/", headers=auth("reader@example.test"), follow_redirects=True
+    ).status_code == 404
+
+
+def test_product_home_destination_uses_existing_endpoint_authorization(tmp_path):
+    write_manifest(
+        tmp_path / "www" / "dashboard",
+        {
+            "schema": "polyptich.www.endpoint",
+            "schema_version": 1,
+            "endpoint_id": "tests.home",
+            "required_scope": "private.read",
+        },
+    )
+
+    class HomeEndpoint:
+        def __init__(self, **_kwargs):
+            pass
+
+        def register(self, app, mount_url, endpoint_name):
+            app.add_url_rule(mount_url + "/", endpoint_name, lambda: "dashboard")
+
+    app = server.create_app(
+        tmp_path,
+        access_verifier=FakeVerifier(),
+        trusted_viewer_emails=["viewer@example.test"],
+        endpoint_factories={"tests.home": HomeEndpoint},
+        home_url="/endpoint/dashboard/",
+    )
+    client = app.test_client()
+
+    assert client.get(
+        "/", headers=auth("reader@example.test"), follow_redirects=True
+    ).status_code == 403
+    assert client.get(
+        "/", headers=auth("viewer@example.test"), follow_redirects=True
+    ).get_data(as_text=True) == "dashboard"
+
+
+@pytest.mark.parametrize(
+    "home_url",
+    ["", "/", "/?next=dashboard", "//example.test/home", "dashboard", " /home", "/\\home"],
+)
+def test_product_home_rejects_nonlocal_or_looping_paths(tmp_path, home_url):
+    (tmp_path / "www").mkdir()
+
+    with pytest.raises(ValueError, match="local absolute path other than root"):
+        server.create_app(tmp_path, access_verifier=FakeVerifier(), home_url=home_url)
 
 
 def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatch):
@@ -255,6 +711,8 @@ def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatc
         "operator@example.test",
         "--external-origin",
         "https://www.example.test",
+        "--home-url",
+        "/endpoint/dashboard/",
     ]
 
     assert server.main(arguments) == 0
@@ -264,7 +722,37 @@ def test_production_cli_requires_loopback_and_runs_waitress(tmp_path, monkeypatc
     assert isinstance(options["access_config"], AccessConfig)
     assert options["trusted_proxy"] is True
     assert options["operator_emails"] == ["operator@example.test"]
+    assert options["home_url"] == "/endpoint/dashboard/"
     non_loopback = list(arguments)
     non_loopback[3] = "0.0.0.0"
     with pytest.raises(ValueError, match="literal loopback"):
         server.main(non_loopback)
+
+
+def test_developer_cli_wires_file_backed_verifier(tmp_path, monkeypatch):
+    captured = {}
+    key_file = tmp_path / "developer.key"
+    key_file.write_text("a" * 64)
+    key_file.chmod(0o600)
+    monkeypatch.setattr(server, "create_app", lambda root, **kwargs: (root, kwargs))
+    monkeypatch.setitem(
+        sys.modules,
+        "waitress",
+        SimpleNamespace(serve=lambda app, **kwargs: captured.update(app=app, serve=kwargs)),
+    )
+
+    assert server.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--developer-key-file",
+            str(key_file),
+            "--developer-email",
+            "developer@example.test",
+        ]
+    ) == 0
+
+    _, options = captured["app"]
+    assert options["access_config"] is None
+    identity = options["developer_access_verifier"].verify("a" * 64)
+    assert identity.email == "developer@example.test"

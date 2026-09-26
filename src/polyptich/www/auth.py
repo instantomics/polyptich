@@ -1,11 +1,15 @@
+from __future__ import annotations
+
+import hmac
+import time
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from flask import abort, g
 
-
-REPORTS_READ = "reports.read"
+DASHBOARD_READ = "dashboard.read"
+DASHBOARD_CONTROL = "dashboard.control"
 AGENT_READ = "agent.read"
 PRIVATE_READ = "private.read"
 AGENT_CONTROL = "agent.control"
@@ -20,7 +24,7 @@ class AccessVerificationError(ValueError):
 class AccessConfig:
     issuer: str
     audience: str
-    jwks_url: Optional[str] = None
+    jwks_url: str | None = None
 
     def __post_init__(self):
         issuer = self.issuer.rstrip("/")
@@ -82,6 +86,29 @@ class CloudflareAccessVerifier:
         return _identity_from_claims(claims, self._config)
 
 
+class LoopbackDeveloperAccessVerifier:
+    def __init__(self, key, *, email="playwright@localhost"):
+        key = str(key)
+        email = str(email).strip()
+        if len(key) < 32:
+            raise ValueError("Developer access key must contain at least 32 characters")
+        if not email or "@" not in email:
+            raise ValueError("Developer access email must be an email address")
+        self._key = key.encode()
+        self._email = email
+
+    def verify(self, token):
+        if not token or not hmac.compare_digest(str(token).encode(), self._key):
+            raise AccessVerificationError("Loopback developer key is invalid")
+        return AccessIdentity(
+            subject="loopback-developer",
+            email=self._email,
+            issuer="polyptich://loopback-developer",
+            audience="loopback",
+            expires_at=int(time.time()) + 300,
+        )
+
+
 def current_identity():
     identity = getattr(g, "polyptich_access_identity", None)
     if identity is None:
@@ -106,11 +133,11 @@ def scopes_for_email(email, *, trusted_viewer_emails=(), operator_emails=()):
     normalized = email.casefold()
     trusted = {value.casefold() for value in trusted_viewer_emails}
     operators = {value.casefold() for value in operator_emails}
-    scopes = {REPORTS_READ, AGENT_READ}
+    scopes = {DASHBOARD_READ, AGENT_READ}
     if normalized in trusted or normalized in operators:
         scopes.add(PRIVATE_READ)
     if normalized in operators:
-        scopes.update({AGENT_CONTROL, SERVICE_RESTART})
+        scopes.update({DASHBOARD_CONTROL, AGENT_CONTROL, SERVICE_RESTART})
     return frozenset(scopes)
 
 
