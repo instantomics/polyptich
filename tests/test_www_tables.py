@@ -56,6 +56,7 @@ def table_app(tmp_path):
             ),
             "danger": ["=2+2", "+cmd", "safe", " @hidden", "-1+2", "plain"],
             "big": [2**60, 1, 2, 3, 4, 5],
+            "measurement": [1.5, np.nan, 2.5, 3.5, 4.5, 5.5],
         }
     )
     asset = report / "table.parquet"
@@ -100,6 +101,8 @@ def test_legacy_data_and_plotly_responses_are_unchanged(table_app):
     assert isinstance(table.get_json(), list)
     assert len(table.get_json()) == len(frame)
     assert table.get_json()[0]["name"] == "Alpha"
+    assert table.get_json()[1]["measurement"] is None
+    assert b"NaN" not in table.data
     assert plot.status_code == 200
     assert plot.get_json() == {"data": [{"x": [1]}]}
 

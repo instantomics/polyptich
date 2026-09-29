@@ -62,6 +62,7 @@ from .tables import (
     build_envelope,
     choose_mode,
     dataframe_column_types,
+    dataframe_records,
     ensure_string_columns,
     export_dataframe,
     parse_query,
@@ -543,7 +544,7 @@ def create_app(
         if component.get("type") == "table":
             pd = _require_pandas()
             if "protocol" not in request.args:
-                return jsonify(pd.read_parquet(asset).to_dict(orient="records"))
+                return jsonify(dataframe_records(pd.read_parquet(asset)))
             frame = ensure_string_columns(
                 table_cache.get(asset, lambda path: pd.read_parquet(path))
             )
