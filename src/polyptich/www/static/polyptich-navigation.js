@@ -88,6 +88,9 @@
   let pageController = null;
   let navigationSequence = 0;
   let currentPageUrl = new URL(window.location.href);
+  let tocObserver = null;
+  let tocScrollFallback = null;
+  let tocRenderFrame = 0;
   const navigationStateKey = "polyptichNavigation";
   const loadedScripts = new Set();
   const navigationScriptUrl = document.currentScript?.src || "";
@@ -126,6 +129,37 @@
     const currentBase = current.pathname.replace(/polyptich-navigation\.js$/, "");
     return candidate.pathname === `${currentBase}polyptich-navigation.js`
       || candidate.pathname === `${currentBase}polyptich-navigation.css`;
+  };
+
+  const decodeFragmentTarget = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch (_error) {
+      return value;
+    }
+  };
+
+  const parseFragment = (value = window.location.hash) => {
+    const fragment = String(value || "").replace(/^#/, "");
+    const separator = fragment.indexOf("?");
+    if (separator >= 0) {
+      return {
+        target: decodeFragmentTarget(fragment.slice(0, separator)),
+        params: new URLSearchParams(fragment.slice(separator + 1)),
+      };
+    }
+    if (fragment.includes("=")) {
+      return {target: "", params: new URLSearchParams(fragment)};
+    }
+    return {target: decodeFragmentTarget(fragment), params: new URLSearchParams()};
+  };
+
+  const formatFragment = (target, params = new URLSearchParams()) => {
+    const encodedTarget = target ? encodeURIComponent(target) : "";
+    const state = new URLSearchParams(params).toString();
+    if (encodedTarget && state) return `#${encodedTarget}?${state}`;
+    if (encodedTarget) return `#${encodedTarget}`;
+    return state ? `#${state}` : "";
   };
 
   for (const element of document.head.querySelectorAll("link[rel~='stylesheet'], style, meta:not([charset])")) {
@@ -715,15 +749,65 @@
     return ul;
   };
 
-  const renderToc = () => {
+  const clearTocTracking = () => {
+    if (tocObserver) tocObserver.disconnect();
+    tocObserver = null;
+    if (tocScrollFallback) window.removeEventListener("scroll", tocScrollFallback);
+    tocScrollFallback = null;
+  };
+
+  const headingIsAvailable = (heading) => {
+    if (heading.closest("[hidden], [inert], [aria-hidden='true']")) return false;
+    for (let details = heading.closest("details"); details; details = details.parentElement?.closest("details")) {
+      if (!details.open && heading.closest("summary")?.parentElement !== details) return false;
+    }
+    return true;
+  };
+
+  const trackTocLocation = (entries) => {
+    clearTocTracking();
+    const setCurrent = () => {
+      if (!entries.length) return;
+      const marker = Math.min(160, Math.max(64, window.innerHeight * 0.2));
+      let current = entries[0];
+      entries.forEach((entry) => {
+        if (entry.heading.getBoundingClientRect().top <= marker) current = entry;
+      });
+      entries.forEach((entry) => {
+        if (entry === current) entry.anchor.setAttribute("aria-current", "location");
+        else entry.anchor.removeAttribute("aria-current");
+      });
+    };
+    if (typeof IntersectionObserver === "function") {
+      tocObserver = new IntersectionObserver(setCurrent, {
+        rootMargin: "-64px 0px -70% 0px",
+        threshold: [0, 1],
+      });
+      entries.forEach((entry) => tocObserver.observe(entry.heading));
+    } else {
+      tocScrollFallback = setCurrent;
+      window.addEventListener("scroll", tocScrollFallback, {passive: true});
+    }
+    setCurrent();
+  };
+
+  const renderToc = ({preserveSearch = false} = {}) => {
+    if (tocRenderFrame) window.cancelAnimationFrame(tocRenderFrame);
+    tocRenderFrame = 0;
+    const previousSearch = preserveSearch
+      ? toc.querySelector(".pt-global-navigation__toc-search input")?.value || ""
+      : "";
+    clearTocTracking();
     toc.replaceChildren();
     toc.hidden = true;
     tocSidebar.hidden = true;
     tocToggle.hidden = true;
     document.body.removeAttribute("data-polyptich-toc-visible");
     if (pageContext.toc === false) return;
-    const headings = [...document.querySelectorAll("h2, h3")].filter((heading) => !heading.closest("#pt-global-navigation-shell"));
-    const entries = headings.map((heading) => {
+    const main = document.getElementById("pt-global-navigation-main");
+    if (!main) return;
+    const seenTargets = new Set();
+    const entries = [...main.querySelectorAll("h2, h3")].map((heading) => {
       let id = heading.id;
       if (!id) {
         const owner = heading.closest("[id]");
@@ -732,27 +816,115 @@
       const labelRoot = heading.cloneNode(true);
       labelRoot.querySelectorAll(".anchor-link").forEach((anchor) => anchor.remove());
       return {heading, id, label: labelRoot.textContent.trim()};
-    }).filter((entry) => entry.id && entry.label);
+    }).filter((entry) => {
+      if (!entry.id || !entry.label || seenTargets.has(entry.id) || !headingIsAvailable(entry.heading)) return false;
+      seenTargets.add(entry.id);
+      return true;
+    });
     if (!entries.length) return;
     const heading = document.createElement("div");
     heading.className = "pt-global-navigation__toc-title";
     heading.textContent = "On this page";
+    const search = document.createElement("div");
+    search.className = "pt-global-navigation__toc-search";
+    search.setAttribute("role", "search");
+    const searchId = `pt-global-navigation-toc-search-${++controlIndex}`;
+    const statusId = `${searchId}-status`;
+    const label = document.createElement("label");
+    label.htmlFor = searchId;
+    label.textContent = "Filter sections";
+    const searchRow = document.createElement("div");
+    searchRow.className = "pt-global-navigation__toc-search-row";
+    const input = document.createElement("input");
+    input.id = searchId;
+    input.type = "search";
+    input.placeholder = "Filter sections";
+    input.autocomplete = "off";
+    input.setAttribute("aria-describedby", statusId);
+    input.value = previousSearch;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "pt-global-navigation__toc-search-clear";
+    clear.setAttribute("aria-label", "Clear section filter");
+    clear.textContent = "Clear";
+    const status = document.createElement("p");
+    status.id = statusId;
+    status.className = "pt-global-navigation__toc-search-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    searchRow.append(input, clear);
+    search.append(label, searchRow, status);
     const ul = document.createElement("ul");
+    const fragmentState = parseFragment();
     entries.forEach((entry) => {
       const li = document.createElement("li");
       li.className = `pt-global-navigation__toc-level-${entry.heading.tagName === "H3" ? "3" : "2"}`;
       const anchor = document.createElement("a");
-      anchor.href = `${window.location.pathname}${window.location.search}#${encodeURIComponent(entry.id)}`;
+      anchor.href = `${window.location.pathname}${window.location.search}${formatFragment(entry.id, fragmentState.params)}`;
       anchor.textContent = entry.label;
+      anchor.addEventListener("click", (event) => {
+        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+          && mobileMedia.matches && openDrawerName === "toc") closeDrawer();
+      });
       li.append(anchor);
       ul.append(li);
+      entry.anchor = anchor;
+      entry.item = li;
     });
-    toc.replaceChildren(heading, ul);
+    const applyFilter = () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      let matches = 0;
+      entries.forEach((entry) => {
+        const match = !query || entry.label.toLocaleLowerCase().includes(query);
+        entry.item.hidden = !match;
+        if (match) matches += 1;
+      });
+      clear.hidden = !query;
+      if (!query) status.textContent = `${entries.length} section${entries.length === 1 ? "" : "s"}`;
+      else if (!matches) status.textContent = "No matching sections";
+      else status.textContent = `${matches} matching section${matches === 1 ? "" : "s"}`;
+    };
+    input.addEventListener("input", applyFilter);
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !input.value) return;
+      event.preventDefault();
+      input.value = "";
+      applyFilter();
+    });
+    clear.addEventListener("click", () => {
+      input.value = "";
+      applyFilter();
+      input.focus();
+    });
+    applyFilter();
+    toc.replaceChildren(heading, search, ul);
     toc.hidden = false;
     tocSidebar.hidden = false;
     tocToggle.hidden = false;
     document.body.setAttribute("data-polyptich-toc-visible", "");
+    trackTocLocation(entries);
   };
+
+  const scheduleTocRebuild = () => {
+    if (tocRenderFrame) window.cancelAnimationFrame(tocRenderFrame);
+    tocRenderFrame = window.requestAnimationFrame(() => {
+      tocRenderFrame = 0;
+      renderToc({preserveSearch: true});
+    });
+  };
+
+  const suspendToc = () => {
+    if (tocRenderFrame) window.cancelAnimationFrame(tocRenderFrame);
+    tocRenderFrame = 0;
+    clearTocTracking();
+  };
+
+  window.addEventListener("polyptich:report-state-change", scheduleTocRebuild);
+  window.addEventListener("polyptich:before-page-swap", suspendToc);
+  document.addEventListener("toggle", (event) => {
+    const main = document.getElementById("pt-global-navigation-main");
+    if (event.target instanceof HTMLDetailsElement && main?.contains(event.target)) scheduleTocRebuild();
+  }, true);
 
   const pageState = (url, scrollX = window.scrollX, scrollY = window.scrollY) => ({
     ...(history.state && typeof history.state === "object" ? history.state : {}),
@@ -931,8 +1103,19 @@
   };
 
   const restorePosition = (url, scrollPosition) => {
-    if (url.hash) {
-      const target = document.getElementById(decodeURIComponent(url.hash.slice(1)));
+    const fragment = parseFragment(url.hash);
+    if (fragment.target) {
+      let target = document.getElementById(fragment.target);
+      if (!target || !headingIsAvailable(target)) {
+        window.dispatchEvent(new CustomEvent("polyptich:report-reveal", {
+          detail: {
+            target: fragment.target,
+            element: target,
+            params: new URLSearchParams(fragment.params),
+          },
+        }));
+        target = document.getElementById(fragment.target);
+      }
       if (target) {
         target.scrollIntoView();
         return;
@@ -982,6 +1165,7 @@
       currentPageUrl = finalUrl;
       if (historyMode === "push") history.pushState(pageState(finalUrl, 0, 0), "", finalUrl);
       else if (historyMode === "replace") history.replaceState(pageState(finalUrl, 0, 0), "", finalUrl);
+      await executeScripts(page);
       applyActiveNavigation();
       document.querySelectorAll(".pt-global-navigation__collection").forEach((collection) => {
         if (collection._ptRefreshCollection) collection._ptRefreshCollection();
@@ -990,7 +1174,6 @@
       if (openDrawerName) closeDrawer();
       restorePosition(finalUrl, scrollPosition);
       if (!scrollPosition && !finalUrl.hash) importedMain.focus({preventScroll: true});
-      await executeScripts(page);
       window.dispatchEvent(new CustomEvent("polyptich:page-swap", {detail: {url: finalUrl.href}}));
       return true;
     } catch (error) {
@@ -1214,4 +1397,5 @@
     });
 
   renderToc();
+  if (window.location.hash) restorePosition(new URL(window.location.href), null);
 })();

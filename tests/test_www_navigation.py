@@ -516,3 +516,39 @@ def test_mobile_drawer_and_shared_preference_contracts_are_present():
     assert "background-image: none" in ui_css
     assert "\nbody {" not in product_css
     assert ":where(.browser, .report, .markdown-document, .error-page) a" in product_css
+
+
+def test_shared_toc_search_scrollspy_and_print_contracts_are_present():
+    static = Path(__file__).parents[1] / "src" / "polyptich" / "www" / "static"
+    navigation_script = (static / "polyptich-navigation.js").read_text()
+    navigation_css = (static / "polyptich-navigation.css").read_text()
+
+    assert 'main.querySelectorAll("h2, h3")' in navigation_script
+    assert 'labelRoot.querySelectorAll(".anchor-link")' in navigation_script
+    assert "seenTargets.has(entry.id)" in navigation_script
+    assert 'search.setAttribute("role", "search")' in navigation_script
+    assert 'label.textContent = "Filter sections"' in navigation_script
+    assert 'clear.setAttribute("aria-label", "Clear section filter")' in navigation_script
+    assert 'status.setAttribute("role", "status")' in navigation_script
+    assert 'status.setAttribute("aria-live", "polite")' in navigation_script
+    assert 'status.textContent = "No matching sections"' in navigation_script
+    assert 'entry.anchor.setAttribute("aria-current", "location")' in navigation_script
+    assert "new IntersectionObserver" in navigation_script
+    assert "tocObserver.disconnect()" in navigation_script
+    assert 'window.addEventListener("polyptich:report-state-change"' in navigation_script
+    assert 'window.addEventListener("polyptich:before-page-swap", suspendToc)' in navigation_script
+    assert 'openDrawerName === "toc") closeDrawer()' in navigation_script
+    assert "if (window.location.hash) restorePosition(new URL(window.location.href), null)" in navigation_script
+
+    assert ".pt-global-navigation__toc-search" in navigation_css
+    assert '.pt-global-navigation__toc a[aria-current="location"]' in navigation_css
+    assert ":focus-visible" in navigation_css
+    assert "@media (forced-colors: active)" in navigation_css
+    assert "@media (prefers-reduced-motion: reduce)" in navigation_css
+    assert "@media print" in navigation_css
+    print_rules = navigation_css.split("@media print {", 1)[1]
+    assert "#pt-global-navigation-shell" in print_rules
+    assert ".pt-global-navigation__mobile-controls" in print_rules
+    assert ".pt-global-navigation__overlay" in print_rules
+    assert ".pt-global-navigation--loading::after" in print_rules
+    assert "margin: 0 !important" in print_rules

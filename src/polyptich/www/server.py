@@ -9,7 +9,6 @@ import stat
 import sys
 from datetime import datetime
 from importlib import metadata
-from io import BytesIO
 from pathlib import Path
 from posixpath import normpath
 from urllib.parse import urlparse, urlunparse
@@ -54,6 +53,20 @@ from .navigation import (
     serialize_service_restart_action,
 )
 from .page import SCHEMA
+from .tables import (
+    DEFAULT_CLIENT_MAX_BYTES,
+    DEFAULT_CLIENT_MAX_ROWS,
+    DataFrameCache,
+    TableQueryError,
+    apply_query,
+    build_envelope,
+    choose_mode,
+    dataframe_column_types,
+    ensure_string_columns,
+    export_dataframe,
+    parse_query,
+    table_statistics,
+)
 
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
@@ -112,7 +125,10 @@ def create_app(
         POLYPTICH_WWW_FILE_CONTROL_TOKEN=secrets.token_urlsafe(32),
         POLYPTICH_WWW_NAVIGATION=navigation,
         POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
+        POLYPTICH_WWW_TABLE_CLIENT_MAX_ROWS=DEFAULT_CLIENT_MAX_ROWS,
+        POLYPTICH_WWW_TABLE_CLIENT_MAX_BYTES=DEFAULT_CLIENT_MAX_BYTES,
     )
+    table_cache = DataFrameCache()
 
     def safe_path(subpath=""):
         requested = base_dir / subpath
@@ -503,7 +519,11 @@ def create_app(
         html = current / "index.html"
         if not html.exists() or html.is_symlink():
             abort(404)
-        return app.response_class(html.read_bytes(), content_type="text/html; charset=utf-8")
+        content = html.read_text()
+        if request.script_root:
+            content = content.replace('="/static/', f'="{request.script_root}/static/')
+            content = content.replace('="/api/', f'="{request.script_root}/api/')
+        return app.response_class(content, content_type="text/html; charset=utf-8")
 
     @app.route("/report-data/<path:subpath>/<component_id>")
     def report_data(subpath, component_id):
@@ -516,10 +536,35 @@ def create_app(
         if component is None:
             abort(404)
         asset = report_asset(current, component)
-        if component["type"] == "table":
+        if component.get("type") == "table":
             pd = _require_pandas()
-            return jsonify(pd.read_parquet(asset).to_dict(orient="records"))
-        if component["type"] == "plotly":
+            if "protocol" not in request.args:
+                return jsonify(pd.read_parquet(asset).to_dict(orient="records"))
+            frame = ensure_string_columns(
+                table_cache.get(asset, lambda path: pd.read_parquet(path))
+            )
+            column_types = dataframe_column_types(frame)
+            try:
+                table_query = parse_query(request.args, column_types, protocol=True)
+                mode = choose_mode(
+                    table_query.data_mode,
+                    table_statistics(asset, component),
+                    max_rows=app.config["POLYPTICH_WWW_TABLE_CLIENT_MAX_ROWS"],
+                    max_bytes=app.config["POLYPTICH_WWW_TABLE_CLIENT_MAX_BYTES"],
+                )
+                return jsonify(
+                    build_envelope(
+                        frame,
+                        component_id,
+                        component,
+                        table_query,
+                        mode,
+                        column_types,
+                    )
+                )
+            except TableQueryError as error:
+                return _table_query_error(error)
+        if component.get("type") == "plotly":
             return send_from_directory(
                 base_dir,
                 str(asset.relative_to(base_dir)),
@@ -527,8 +572,15 @@ def create_app(
             )
         abort(404)
 
-    @app.route("/report-download/<path:subpath>/<component_id>.xlsx")
-    def report_download(subpath, component_id):
+    @app.route(
+        "/report-download/<path:subpath>/<component_id>.xlsx",
+        defaults={"file_format": "xlsx"},
+    )
+    @app.route(
+        "/report-download/<path:subpath>/<component_id>.csv",
+        defaults={"file_format": "csv"},
+    )
+    def report_download(subpath, component_id, file_format):
         current = safe_path(subpath)
         require_scope(path_scope(current))
         manifest = report_manifest(current)
@@ -539,14 +591,20 @@ def create_app(
             abort(404)
         pd = _require_pandas()
         asset = report_asset(current, component)
-        output = BytesIO()
-        pd.read_parquet(asset).to_excel(output, index=False)
-        output.seek(0)
+        frame = ensure_string_columns(table_cache.get(asset, lambda path: pd.read_parquet(path)))
+        column_types = dataframe_column_types(frame)
+        try:
+            table_query = parse_query(request.args, column_types)
+            selected = apply_query(frame, table_query)
+            selected = selected.loc[:, table_query.columns or list(column_types)]
+            output, mimetype = export_dataframe(selected, file_format)
+        except TableQueryError as error:
+            return _table_query_error(error)
         return send_file(
             output,
             as_attachment=True,
-            download_name=f"{component_id}.xlsx",
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            download_name=f"{component_id}.{file_format}",
+            mimetype=mimetype,
         )
 
     @app.route("/static/<path:filename>")
@@ -919,6 +977,13 @@ def _bounded_positive_int_arg(name, default, *, maximum):
     if value < 1 or value > maximum:
         abort(400, description=f"{name} must be between 1 and {maximum}")
     return value
+
+
+def _table_query_error(error):
+    payload = {"error": "invalid_table_query", "message": str(error)}
+    if error.field is not None:
+        payload["field"] = error.field
+    return jsonify(payload), 400
 
 
 def _directory_navigation_item(

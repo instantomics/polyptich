@@ -58,3 +58,38 @@ def test_raw_html_stays_outside_partial_navigation_protocol(tmp_path: Path):
     assert response.status_code == 200
     assert b"data-polyptich-navigation-host" not in response.data
     assert b"data-polyptich-page-version" not in response.data
+
+
+def test_partial_navigation_fragment_and_report_initialisation_contracts():
+    script_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyptich"
+        / "www"
+        / "static"
+        / "polyptich-navigation.js"
+    )
+    script = script_path.read_text()
+
+    assert 'const separator = fragment.indexOf("?")' in script
+    assert 'return {target: "", params: new URLSearchParams(fragment)}' in script
+    assert "decodeFragmentTarget(fragment)" in script
+    assert 'return `#${encodedTarget}?${state}`' in script
+    assert "formatFragment(entry.id, fragmentState.params)" in script
+    assert "const fragment = parseFragment(url.hash)" in script
+    assert 'new CustomEvent("polyptich:report-reveal"' in script
+    assert "target: fragment.target" in script
+    assert "params: new URLSearchParams(fragment.params)" in script
+
+    commit_page = script.split("const commitPage = async", 1)[1].split(
+        "const navigate = async", 1
+    )[0]
+    assert commit_page.index("oldScripts) script.remove()") < commit_page.index(
+        "await executeScripts(page)"
+    )
+    assert commit_page.index("await executeScripts(page)") < commit_page.index(
+        "renderToc()"
+    )
+    assert commit_page.index("renderToc()") < commit_page.index(
+        "restorePosition(finalUrl, scrollPosition)"
+    )
