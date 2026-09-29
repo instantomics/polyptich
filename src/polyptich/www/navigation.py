@@ -253,7 +253,7 @@ def directory_has_navigation_content(path, *, can_access=lambda _path: True):
             continue
         if not can_access(child):
             continue
-        if child.is_file() and child.suffix.casefold() in {".html", ".htm"}:
+        if child.is_file() and child.suffix.casefold() in {".html", ".htm", ".md"}:
             return True
         if child.is_dir() and directory_has_navigation_content(child, can_access=can_access):
             return True
@@ -541,7 +541,7 @@ def _assign_paths(node, base_dir, endpoint_paths):
 
 def _path_for_href(href, base_dir, endpoint_paths):
     path = urlsplit(href).path
-    for prefix in ("/files/", "/browse/", "/report/"):
+    for prefix in ("/files/", "/browse/", "/report/", "/document/"):
         if path.startswith(prefix):
             return (base_dir / unquote(path[len(prefix) :])).resolve()
     if path in {"/", "/browse", "/browse/", "/files", "/files/"}:

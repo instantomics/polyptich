@@ -109,6 +109,38 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     assert b'data-navigation-url="/gateway/api/v1/navigation"' in prefixed.data
 
 
+def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tmp_path):
+    docs = tmp_path / "www" / "docs"
+    images = docs / "images"
+    images.mkdir(parents=True)
+    (images / "plot.png").write_bytes(b"plot")
+    (docs / "related.md").write_text("# Related\n")
+    (docs / "grant.md").write_text(
+        "# Current grant\n\n"
+        "| Field | Value |\n| --- | --- |\n| GPUs | 4 |\n\n"
+        "[Related](related.md#details)\n\n![Plot](images/plot.png)\n\n"
+        "<script>alert('unsafe')</script>\n"
+    )
+    app = create_app(tmp_path, access_verifier=FakeVerifier())
+    client = app.test_client()
+
+    listing = client.get("/browse/docs", headers=auth()).get_data(as_text=True)
+    assert 'href="/document/docs/grant.md"' in listing
+    assert "markdown document" in listing
+    assert 'href="/files/docs/grant.md"' in listing
+
+    response = client.get("/document/docs/grant.md", headers=auth())
+    document = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert '<main id="pt-global-navigation-main" class="markdown-document"' in document
+    assert "<h1>Current grant</h1>" in document
+    assert "<table>" in document
+    assert 'href="/document/docs/related.md#details"' in document
+    assert 'src="/files/docs/images/plot.png"' in document
+    assert "<script>alert('unsafe')</script>" not in document
+    assert "&lt;script&gt;alert('unsafe')&lt;/script&gt;" in document
+
+
 def test_workspace_app_places_versioned_bootstrap_inside_main(tmp_path):
     (tmp_path / "www").mkdir()
     app = create_app(tmp_path, access_verifier=FakeVerifier())
@@ -483,4 +515,4 @@ def test_mobile_drawer_and_shared_preference_contracts_are_present():
     assert "@media (forced-colors: active)" in ui_css
     assert "background-image: none" in ui_css
     assert "\nbody {" not in product_css
-    assert ":where(.browser, .report, .error-page) a" in product_css
+    assert ":where(.browser, .report, .markdown-document, .error-page) a" in product_css

@@ -11,7 +11,8 @@ from datetime import datetime
 from importlib import metadata
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urlparse
+from posixpath import normpath
+from urllib.parse import urlparse, urlunparse
 
 from flask import (
     Flask,
@@ -25,6 +26,8 @@ from flask import (
     send_from_directory,
     url_for,
 )
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 
 from .auth import (
     DASHBOARD_CONTROL,
@@ -236,7 +239,9 @@ def create_app(
                     "is_dir": is_dir,
                     "is_report": item_manifest is not None or item_endpoint is not None,
                     "is_html": is_html,
-                    "icon": _item_icon(item_manifest or item_endpoint, is_dir, is_html),
+                    "icon": _item_icon(
+                        item_manifest or item_endpoint, is_dir, is_html, path
+                    ),
                     "kind": _item_kind(item_manifest, item_endpoint, is_dir, path),
                     "size": _format_size(None if is_dir else path.stat().st_size),
                     "modified": _format_mtime(path),
@@ -246,6 +251,9 @@ def create_app(
                     if item_manifest is not None
                     or item_endpoint is not None
                     or (is_dir and _directory_index(path) is not None)
+                    else None,
+                    "download_href": url_for("download", filename=rel)
+                    if path.is_file() and path.suffix.casefold() == ".md"
                     else None,
                 }
             )
@@ -295,6 +303,27 @@ def create_app(
         if target.suffix.casefold() in {".html", ".htm"}:
             return app.response_class(target.read_bytes(), content_type="text/html; charset=utf-8")
         return send_from_directory(base_dir, filename, as_attachment=False)
+
+    @app.get("/document/<path:filename>")
+    def render_markdown(filename):
+        target = safe_path(filename)
+        if not target.is_file() or target.suffix.casefold() != ".md":
+            abort(404)
+        require_scope(path_scope(target))
+        title, body = _render_markdown(target.read_text(encoding="utf-8"), filename)
+        content = render_template(
+            "markdown.html",
+            title=title,
+            body=Markup(body),
+            breadcrumbs=_build_breadcrumbs(filename),
+            download_href=url_for("download", filename=filename),
+        )
+        return render_workspace_page(
+            title,
+            content,
+            stylesheets=[url_for("static_files", filename="polyptich-www.css")],
+            main_class="markdown-document",
+        )
 
     @app.post("/upload/", defaults={"subpath": ""})
     @app.post("/upload/<path:subpath>")
@@ -798,13 +827,15 @@ def _sort_key(path):
     )
 
 
-def _item_icon(manifest, is_dir, is_html):
+def _item_icon(manifest, is_dir, is_html, path=None):
     if manifest is not None:
         return "report"
     if is_dir:
         return "folder"
     if is_html:
         return "html"
+    if path is not None and path.suffix.casefold() == ".md":
+        return "markdown"
     return "file"
 
 
@@ -815,6 +846,8 @@ def _item_kind(manifest, endpoint, is_dir, path):
         return "polyptich endpoint"
     if is_dir:
         return "directory"
+    if path.suffix.casefold() == ".md":
+        return "markdown document"
     return path.suffix.lower().lstrip(".") or "file"
 
 
@@ -828,7 +861,47 @@ def _item_href(rel, manifest, endpoint, is_dir, path=None):
         if index is not None:
             return url_for("download", filename=rel.rstrip("/") + "/")
         return url_for("browse", subpath=rel)
+    if path is not None and path.suffix.casefold() == ".md":
+        return url_for("render_markdown", filename=rel)
     return url_for("download", filename=rel)
+
+
+def _render_markdown(source, filename):
+    markdown = MarkdownIt(
+        "commonmark",
+        {"html": False, "linkify": False, "typographer": False},
+    ).enable(["table", "strikethrough"])
+    tokens = markdown.parse(source)
+    title = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
+    for index, token in enumerate(tokens):
+        if token.type == "heading_open" and token.tag == "h1" and index + 1 < len(tokens):
+            title = tokens[index + 1].content.strip() or title
+            break
+    for token in tokens:
+        for child in token.children or ():
+            attribute = (
+                "src"
+                if child.type == "image"
+                else "href"
+                if child.type == "link_open"
+                else None
+            )
+            if attribute is None:
+                continue
+            value = child.attrGet(attribute)
+            if value:
+                child.attrSet(attribute, _markdown_link(filename, value))
+    return title, markdown.renderer.render(tokens, markdown.options, {})
+
+
+def _markdown_link(filename, value):
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc or parsed.path.startswith("/") or not parsed.path:
+        return value
+    relative = normpath(f"{Path(filename).parent.as_posix()}/{parsed.path}")
+    endpoint = "render_markdown" if Path(relative).suffix.casefold() == ".md" else "download"
+    resolved = url_for(endpoint, filename=relative)
+    return urlunparse(("", "", resolved, parsed.params, parsed.query, parsed.fragment))
 
 
 def _request_local_url(value):
@@ -852,10 +925,10 @@ def _directory_navigation_item(
     path, base_dir, collection_id, *, collection_root, can_access
 ):
     is_directory = path.is_dir()
-    is_html = path.is_file() and path.suffix.casefold() in {".html", ".htm"}
+    is_document = path.is_file() and path.suffix.casefold() in {".html", ".htm", ".md"}
     if is_directory and not directory_has_navigation_content(path, can_access=can_access):
         return None
-    if not is_directory and not is_html:
+    if not is_directory and not is_document:
         return None
     relative = path.relative_to(base_dir).as_posix()
     if is_directory:
@@ -876,7 +949,11 @@ def _directory_navigation_item(
         else:
             href = url_for("browse", subpath=relative, browse=1)
     else:
-        href = url_for("download", filename=relative)
+        href = (
+            url_for("render_markdown", filename=relative)
+            if path.suffix.casefold() == ".md"
+            else url_for("download", filename=relative)
+        )
     digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
     expandable = is_directory and _directory_has_navigation_children(
         path, can_access=can_access
@@ -921,7 +998,7 @@ def _directory_has_navigation_children(path, *, can_access):
     for child in children:
         if child.is_symlink() or _is_hidden_collection_name(child.name) or not can_access(child):
             continue
-        if child.is_file() and child.suffix.casefold() in {".html", ".htm"}:
+        if child.is_file() and child.suffix.casefold() in {".html", ".htm", ".md"}:
             return True
         if child.is_dir() and directory_has_navigation_content(child, can_access=can_access):
             return True

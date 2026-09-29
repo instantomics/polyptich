@@ -1,12 +1,12 @@
-:where(.browser, .report, .error-page) {
+:where(.browser, .report, .markdown-document, .error-page) {
   font-family: var(--bs-body-font-family);
   color: var(--bs-body-color);
   background: var(--bs-body-bg);
 }
 
-:where(.browser, .report, .error-page) a { color: var(--bs-link-color); text-underline-offset: 0.15em; }
-:where(.browser, .report, .error-page) code { overflow-wrap: anywhere; }
-:where(.browser, .report, .error-page) :is(h1, h2, h3) { line-height: 1.12; }
+:where(.browser, .report, .markdown-document, .error-page) a { color: var(--bs-link-color); text-underline-offset: 0.15em; }
+:where(.browser, .report, .markdown-document, .error-page) code { overflow-wrap: anywhere; }
+:where(.browser, .report, .markdown-document, .error-page) :is(h1, h2, h3) { line-height: 1.12; }
 
 .browser { max-width: 62rem; margin: 0 auto; padding: 1.25rem; }
 .error-page { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; box-sizing: border-box; }
@@ -34,11 +34,28 @@
 .browser .icon-report::before { content: "📊"; }
 .browser .icon-folder::before { content: "/"; color: #d97706; font-weight: 800; }
 .browser .icon-html::before { content: "H"; color: #059669; font-weight: 800; }
+.browser .icon-markdown::before { content: "M"; color: #2554c7; font-weight: 800; }
 .browser .icon-file::before { content: "F"; color: #667085; font-weight: 800; }
 .browser .inline-action { position: relative; z-index: 1; white-space: nowrap; margin-right: 0.55rem; }
 .browser .inline-delete { display: inline; position: relative; z-index: 1; }
 .browser .inline-delete button { border: 0; background: transparent; color: #b42318; cursor: pointer; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 0.15em; }
 .browser .inline-delete button:hover { color: #7a271a; }
+
+.markdown-document { width: min(58rem, 100%); margin: 0 auto; padding: 1.5rem clamp(1rem, 4vw, 3rem) 4rem; }
+.markdown-header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 2rem; padding-bottom: 0.8rem; border-bottom: 1px solid #e4e7ec; }
+.markdown-header .breadcrumbs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; color: #667085; }
+.markdown-source-link { white-space: nowrap; font-size: 0.9rem; }
+.markdown-body { font-size: 1.02rem; line-height: 1.7; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body :is(h1, h2, h3, h4) { margin-top: 1.8em; margin-bottom: 0.65em; }
+.markdown-body h1 { font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.025em; }
+.markdown-body h2 { padding-bottom: 0.3rem; border-bottom: 1px solid #e4e7ec; font-size: clamp(1.4rem, 3vw, 1.9rem); }
+.markdown-body :is(img, svg) { display: block; max-width: 100%; height: auto; }
+.markdown-body pre { max-width: 100%; overflow-x: auto; padding: 1rem; border-radius: 0.65rem; background: #f2f4f7; }
+.markdown-body blockquote { margin-inline: 0; padding: 0.15rem 1rem; border-left: 0.25rem solid #d0d5dd; color: #475467; }
+.markdown-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-body :is(th, td) { padding: 0.55rem 0.7rem; border: 1px solid #d0d5dd; vertical-align: top; }
+.markdown-body th { background: #f8faff; }
 
 .report-shell { display: grid; grid-template-columns: 17rem minmax(0, 1fr); min-height: 100vh; }
 .report-shell .toc { position: sticky; top: 0; align-self: start; height: 100vh; box-sizing: border-box; overflow: auto; padding: 1rem; border-right: 1px solid #e4e7ec; background: #ffffffcc; backdrop-filter: blur(8px); }
