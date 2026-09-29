@@ -1,14 +1,17 @@
 # ruff: noqa: TRY004 -- malformed persisted declarations consistently raise ValueError.
 
+import hashlib
 import json
 import re
 from pathlib import PurePosixPath
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 SCHEMA = "polyptich.www.navigation"
 SCHEMA_VERSION = 1
 COLLECTION_SCHEMA = "polyptich.www.navigation.collection"
 COLLECTION_SCHEMA_VERSION = 1
+FOLDER_SIDEBAR_SCHEMA = "polyptich.www.sidebar.folder"
+FOLDER_SIDEBAR_SCHEMA_VERSION = 1
 
 _NODE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
@@ -49,7 +52,7 @@ _NODE_KEYS = {
 }
 _COLLECTION_KEYS = {"type", "path", "href", "placeholder", "favorites"}
 _BRAND_KEYS = {"label", "asset"}
-_HIDDEN_NAMES = {"assets", ".assets", "manifest.json", "navigation.json"}
+_HIDDEN_NAMES = {"assets", ".assets", "manifest.json", "navigation.json", "sidebar.json"}
 _MOUNT_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]*$")
 _RESERVED_MOUNT_ROOTS = frozenset(
     {
@@ -125,6 +128,7 @@ def load_navigation(base_dir, manifests, *, endpoint_mounts=None):
         _validate_node(item, navigation_path, ids, base_dir=base_dir, mount_url=None, scope=None)
         for item in declaration["items"]
     ]
+    items.extend(_load_folder_sidebar_items(base_dir, ids))
     parent_of = {}
     _record_existing_parents(items, parent_of)
     contributions = []
@@ -186,6 +190,63 @@ def load_navigation(base_dir, manifests, *, endpoint_mounts=None):
         "items": items,
         "nodes": ids,
     }
+
+
+def _load_folder_sidebar_items(base_dir, ids):
+    discovered = []
+    for directory in base_dir.iterdir():
+        manifest_path = directory / "sidebar.json"
+        if not directory.is_dir() or directory.is_symlink() or not manifest_path.is_file():
+            continue
+        declaration = _read_json_object(manifest_path)
+        allowed = {
+            "schema",
+            "schema_version",
+            "label",
+            "icon",
+            "order",
+            "favorite",
+            "favorites",
+            "placeholder",
+        }
+        if (
+            set(declaration) - allowed
+            or declaration.get("schema") != FOLDER_SIDEBAR_SCHEMA
+            or declaration.get("schema_version") != FOLDER_SIDEBAR_SCHEMA_VERSION
+        ):
+            raise ValueError(f"{manifest_path} is not a valid folder sidebar manifest")
+        order = declaration.get("order", 0)
+        if type(order) is not int:
+            raise ValueError(f"{manifest_path} order must be an integer")
+        relative = directory.relative_to(base_dir).as_posix()
+        digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
+        collection = {
+            "type": "directory",
+            "path": relative,
+            "favorites": declaration.get("favorites", []),
+        }
+        if "placeholder" in declaration:
+            collection["placeholder"] = declaration["placeholder"]
+        value = {
+            "id": f"folder.{digest}",
+            "label": declaration.get("label"),
+            "type": "collection",
+            "icon": declaration.get("icon", "folder"),
+            "favorite": declaration.get("favorite", False),
+            "href": f"/browse/{quote(relative, safe='/')}",
+            "collection": collection,
+        }
+        node = _validate_node(
+            value,
+            manifest_path,
+            ids,
+            base_dir=base_dir,
+            mount_url=None,
+            scope=_required_scope_value(base_dir, directory),
+            inherited_path=directory,
+        )
+        discovered.append((order, node["label"].casefold(), relative.casefold(), node))
+    return [node for _order, _label, _relative, node in sorted(discovered)]
 
 
 def serialize_navigation(navigation, *, can_access, collection_href, script_root=""):

@@ -238,7 +238,11 @@ def create_app(
 
         items = []
         for path in sorted(current.iterdir(), key=_sort_key):
-            if path.is_symlink() or not has_scope(path_scope(path)):
+            if (
+                path.is_symlink()
+                or path.name.casefold() == "sidebar.json"
+                or not has_scope(path_scope(path))
+            ):
                 continue
             if query and query.lower() not in path.name.lower():
                 continue

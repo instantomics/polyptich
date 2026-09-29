@@ -317,6 +317,54 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     )
 
 
+def test_folder_sidebar_manifests_discover_ordered_directory_collections(tmp_path):
+    www = tmp_path / "www"
+    analysis = www / "analysis"
+    documents = www / "grant documents"
+    analysis.mkdir(parents=True)
+    documents.mkdir()
+    (analysis / "report.md").write_text("# Report\n")
+    (documents / "application.md").write_text("# Application\n")
+    (analysis / "sidebar.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.sidebar.folder",
+                "schema_version": 1,
+                "label": "Analysis",
+                "icon": "chart",
+                "order": 20,
+                "placeholder": "Find an analysis",
+                "favorites": ["report.md"],
+            }
+        )
+    )
+    (documents / "sidebar.json").write_text(
+        json.dumps(
+            {
+                "schema": "polyptich.www.sidebar.folder",
+                "schema_version": 1,
+                "label": "Grant documents",
+                "icon": "document",
+                "order": 10,
+            }
+        )
+    )
+    app = create_app(tmp_path, access_verifier=FakeVerifier())
+    client = app.test_client()
+
+    items = client.get("/api/v1/navigation", headers=auth()).get_json()["items"]
+    assert [item["label"] for item in items] == ["Grant documents", "Analysis"]
+    assert items[0]["href"] == "/browse/grant%20documents"
+    assert items[0]["icon"] == "document"
+    assert items[1]["collection"]["placeholder"] == "Find an analysis"
+    collection = client.get(items[1]["collection"]["href"], headers=auth()).get_json()
+    assert [item["label"] for item in collection["favorites"]] == ["report.md"]
+    assert collection["items"] == []
+    assert "sidebar.json" not in client.get("/browse/analysis", headers=auth()).get_data(
+        as_text=True
+    )
+
+
 @pytest.mark.parametrize(
     "required_scope", [None, "", " private.read", "private read", "<private>", 3, []]
 )
