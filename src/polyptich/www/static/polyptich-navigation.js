@@ -92,6 +92,14 @@
   let tocScrollFallback = null;
   let tocRenderFrame = 0;
   const navigationStateKey = "polyptichNavigation";
+  const expandedStorageKey = "polyptichNavigationExpanded";
+  const expandedNavigationIds = new Set();
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(expandedStorageKey) || "[]");
+    if (Array.isArray(stored)) stored.filter((id) => typeof id === "string").forEach((id) => expandedNavigationIds.add(id));
+  } catch (_error) {
+    // Folders start collapsed when session storage is unavailable.
+  }
   const loadedScripts = new Set();
   const navigationScriptUrl = document.currentScript?.src || "";
   const navigationIcons = new Map([
@@ -185,7 +193,8 @@
   );
 
   const containsCurrentNavigation = (item) => pageContext.navigation_id === item.id
-    || pageContext.navigation_id?.startsWith(`${item.id}.`);
+    || pageContext.navigation_id?.startsWith(`${item.id}.`)
+    || (Array.isArray(pageContext.navigation_trail) && pageContext.navigation_trail.includes(item.id));
 
   const markActive = (anchor, item) => {
     if (pageContext.navigation_id && item.id === pageContext.navigation_id) {
@@ -212,14 +221,12 @@
       active.setAttribute("aria-current", "page");
       for (let panel = active.parentElement; panel && panel !== listRoot; panel = panel.parentElement) {
         if (!panel.id?.startsWith("pt-global-navigation-panel-")) continue;
-        panel.hidden = false;
-        const disclosure = listRoot.querySelector(`[aria-controls="${CSS.escape(panel.id)}"]`);
-        if (disclosure) {
-          disclosure.setAttribute("aria-expanded", "true");
-          disclosure.setAttribute("aria-label", disclosure.getAttribute("aria-label")?.replace(/^Expand /, "Collapse ") || "Collapse");
-        }
+        listRoot.querySelector(`[aria-controls="${CSS.escape(panel.id)}"]`)?._ptSetExpanded(true);
       }
     }
+    listRoot.querySelectorAll(".pt-global-navigation__disclosure").forEach((disclosure) => {
+      if (containsCurrentNavigation({id: disclosure.dataset.navigationId})) disclosure._ptSetExpanded(true);
+    });
   };
 
   const enabledFocusableElements = (root) => [...root.querySelectorAll(focusableSelector)]
@@ -543,6 +550,11 @@
       status,
     );
 
+    const setStatus = (text) => {
+      status.textContent = text;
+      status.hidden = !text;
+    };
+
     const isFavorite = (item) => Object.prototype.hasOwnProperty.call(favoriteOverrides, item.id)
       ? favoriteOverrides[item.id]
       : Boolean(item.favorite);
@@ -591,7 +603,7 @@
       if (config.placeholder) url.searchParams.set("q", query);
       url.searchParams.set("page", String(requestedPage));
       url.searchParams.set("page_size", String(pageSize));
-      status.textContent = "Loading…";
+      setStatus("Loading…");
       previous.disabled = true;
       next.disabled = true;
       refresh.disabled = true;
@@ -608,20 +620,23 @@
         page = payload.page;
         total = payload.total;
         const pages = Number.isInteger(total) ? Math.max(1, Math.ceil(total / payload.page_size)) : null;
-        toolbar.hidden = false;
+        toolbar.hidden = page <= 1 && !payload.has_more;
         previous.disabled = page <= 1;
         next.disabled = !payload.has_more;
         refresh.disabled = false;
         pageStatus.textContent = `${page} / ${pages ?? "?"}`;
         pageStatus.setAttribute("aria-label", pages === null ? `Page ${page}` : `Page ${page} of ${pages}`);
         const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
-        status.textContent = ordinaryItems.length
-          ? `${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`
-          : "No matching pages";
+        if (!ordinaryItems.length && query) setStatus("No matching pages");
+        else if (!ordinaryItems.length && !payload.favorites.length) setStatus("Empty folder");
+        else if (!toolbar.hidden) {
+          setStatus(`${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`);
+        } else setStatus("");
         ready = true;
       } catch (error) {
         if (controller === activeController && error.name !== "AbortError") {
-          status.textContent = "Navigation is temporarily unavailable";
+          setStatus("Navigation is temporarily unavailable");
+          toolbar.hidden = false;
           previous.disabled = page <= 1;
           next.disabled = page * pageSize >= total;
           refresh.disabled = false;
@@ -673,6 +688,7 @@
         disclosure.setAttribute("aria-label", `Expand ${item.label}`);
         disclosure.setAttribute("aria-expanded", "false");
         disclosure.setAttribute("aria-controls", panelId);
+        disclosure.dataset.navigationId = item.id;
         row.append(disclosure);
         panel = document.createElement("div");
         panel.id = panelId;
@@ -734,14 +750,21 @@
           disclosure.setAttribute("aria-expanded", String(expanded));
           disclosure.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${item.label}`);
           panel.hidden = !expanded;
+          if (expanded) expandedNavigationIds.add(item.id);
+          else expandedNavigationIds.delete(item.id);
+          try {
+            window.sessionStorage.setItem(expandedStorageKey, JSON.stringify([...expandedNavigationIds]));
+          } catch (_error) {
+            // Open folders are still remembered for this page when storage is unavailable.
+          }
           if (expanded && collection) renderCollection(collection, item.collection);
         };
+        disclosure._ptSetExpanded = setExpanded;
         disclosure.addEventListener("click", () => setExpanded(disclosure.getAttribute("aria-expanded") !== "true"));
-        if (destination.getAttribute && destination.getAttribute("aria-current") === "page") {
-          setExpanded(true);
-        }
-        if (panel.querySelector('[aria-current="page"]')) setExpanded(true);
-        if (containsCurrentNavigation(item)) setExpanded(true);
+        if (expandedNavigationIds.has(item.id)
+          || destination.getAttribute?.("aria-current") === "page"
+          || panel.querySelector('[aria-current="page"]')
+          || containsCurrentNavigation(item)) setExpanded(true);
         li.append(panel);
       }
       ul.append(li);

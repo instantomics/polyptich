@@ -166,6 +166,23 @@ def create_app(
             return None
         return manifest
 
+    def sidebar_location(target):
+        """Return the sidebar id of target and the ids of the folders leading to it."""
+        for node_id, node in app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].items():
+            collection = node.get("collection")
+            if collection is None or collection.get("type") != "directory":
+                continue
+            root = (base_dir / collection["path"]).resolve()
+            if target != root and root not in target.parents:
+                continue
+            parts = target.relative_to(root).parts
+            ids = [node_id]
+            for depth in range(1, len(parts) + 1):
+                relative = root.joinpath(*parts[:depth]).relative_to(base_dir).as_posix()
+                ids.append(_directory_item_id(node_id, relative))
+            return {"navigation_id": ids[-1], "navigation_trail": ids[:-1]}
+        return {}
+
     def path_scope(path):
         return _required_scope(base_dir, path)
 
@@ -303,6 +320,7 @@ def create_app(
             ),
             main_class="browser",
             toc=False,
+            **sidebar_location(current),
         )
 
     @app.route("/files/")
@@ -344,6 +362,7 @@ def create_app(
             content,
             stylesheets=[url_for("static_files", filename="polyptich-www.css")],
             main_class="markdown-document",
+            **sidebar_location(target),
         )
 
     @app.post("/upload/", defaults={"subpath": ""})
@@ -1024,12 +1043,11 @@ def _directory_navigation_item(
             if path.suffix.casefold() == ".md"
             else url_for("download", filename=relative)
         )
-    digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
     expandable = is_directory and _directory_has_navigation_children(
         path, can_access=can_access
     )
     item = {
-        "id": f"{collection_id}.item.{digest}",
+        "id": _directory_item_id(collection_id, relative),
         "label": path.name,
         "type": "collection" if expandable else "page",
         "href": href,
@@ -1046,6 +1064,11 @@ def _directory_navigation_item(
             ),
         }
     return item
+
+
+def _directory_item_id(collection_id, relative):
+    digest = hashlib.sha256(relative.encode()).hexdigest()[:16]
+    return f"{collection_id}.item.{digest}"
 
 
 def _directory_index(path):

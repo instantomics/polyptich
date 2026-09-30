@@ -365,6 +365,29 @@ def test_folder_sidebar_manifests_discover_ordered_directory_collections(tmp_pat
     )
 
 
+def test_pages_inside_sidebar_folders_name_the_folders_leading_to_them(tmp_path):
+    grant = tmp_path / "www" / "grants" / "regular-2026"
+    grant.mkdir(parents=True)
+    (grant / "APPLICATION.md").write_text("# Application\n")
+    (grant.parent / "sidebar.json").write_text(
+        json.dumps({"schema": "polyptich.www.sidebar.folder", "schema_version": 1, "label": "Grants"})
+    )
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+
+    def page_context(url):
+        html = client.get(url, headers=auth()).get_data(as_text=True)
+        start = html.index(">", html.index('id="pt-global-navigation-context"')) + 1
+        return json.loads(html[start : html.index("</script>", start)])
+
+    grants = client.get("/api/v1/navigation", headers=auth()).get_json()["items"][0]
+    folder = client.get(grants["collection"]["href"], headers=auth()).get_json()["items"][0]
+    document = client.get(folder["collection"]["href"], headers=auth()).get_json()["items"][0]
+    context = page_context(document["href"])
+    assert context["navigation_id"] == document["id"]
+    assert context["navigation_trail"] == [grants["id"], folder["id"]]
+    assert page_context(folder["href"])["navigation_trail"] == [grants["id"]]
+
+
 @pytest.mark.parametrize(
     "required_scope", [None, "", " private.read", "private read", "<private>", 3, []]
 )

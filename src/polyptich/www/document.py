@@ -19,6 +19,7 @@ def render_workspace_document(
     content_html,
     *,
     navigation_id=None,
+    navigation_trail=(),
     stylesheets=(),
     favicon_url=None,
     head_html="",
@@ -42,6 +43,9 @@ def render_workspace_document(
         not isinstance(navigation_id, str) or not navigation_id.strip()
     ):
         raise ValueError("navigation_id must be a non-empty string or None")
+    navigation_trail = list(navigation_trail)
+    if not all(isinstance(item, str) and item.strip() for item in navigation_trail):
+        raise ValueError("navigation_trail must contain non-empty strings")
     if type(toc) is not bool:
         raise TypeError("toc must be a boolean")
 
@@ -81,6 +85,7 @@ def render_workspace_document(
             "schema": PAGE_CONTEXT_SCHEMA,
             "schema_version": PAGE_CONTEXT_SCHEMA_VERSION,
             "navigation_id": navigation_id,
+            "navigation_trail": navigation_trail,
             "toc": toc,
         }
     )
@@ -153,6 +158,7 @@ def render_workspace_page(
     content_html,
     *,
     navigation_id=None,
+    navigation_trail=(),
     stylesheets=(),
     favicon_url=None,
     head_html="",
@@ -165,6 +171,7 @@ def render_workspace_page(
         title,
         content_html,
         navigation_id=navigation_id,
+        navigation_trail=navigation_trail,
         stylesheets=stylesheets,
         favicon_url=favicon_url,
         head_html=head_html,
