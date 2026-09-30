@@ -10,8 +10,7 @@ import sys
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
-from posixpath import normpath
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 from flask import (
     Flask,
@@ -48,7 +47,10 @@ from .navigation import (
     endpoint_mount_url,
     endpoint_mount_urls,
     is_hidden_name,
+    is_hidden_path,
     load_navigation,
+    read_folder_sidebar,
+    read_sidebar,
     serialize_navigation,
     serialize_service_restart_action,
 )
@@ -72,6 +74,7 @@ from .tables import (
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
 ENDPOINT_ENTRY_POINT_GROUP = "polyptich.www.endpoints"
+ROOT_COLLECTION_ID = "www"
 
 
 def create_app(
@@ -181,7 +184,36 @@ def create_app(
                 relative = root.joinpath(*parts[:depth]).relative_to(base_dir).as_posix()
                 ids.append(_directory_item_id(node_id, relative))
             return {"navigation_id": ids[-1], "navigation_trail": ids[:-1]}
-        return {}
+        if target == base_dir:
+            return {}
+        parts = target.relative_to(base_dir).parts
+        ids = [
+            _directory_item_id(ROOT_COLLECTION_ID, "/".join(parts[:depth]))
+            for depth in range(1, len(parts) + 1)
+        ]
+        return {"navigation_id": ids[-1], "navigation_trail": ids[:-1]}
+
+    def sidebar_entries(current, collection_id, collection_root):
+        """Return (path, item) for the visible children of one folder, in display order."""
+        hide = (read_sidebar(base_dir) or {"hide": []})["hide"]
+        entries = []
+        for path in current.iterdir():
+            if path.is_symlink() or _is_hidden_collection_name(path.name):
+                continue
+            if is_hidden_path(path.relative_to(base_dir).as_posix(), hide):
+                continue
+            if not has_scope(path_scope(path)):
+                continue
+            item = _directory_navigation_item(
+                path,
+                base_dir,
+                collection_id,
+                collection_root=collection_root,
+                can_access=lambda child: has_scope(path_scope(child)),
+            )
+            if item is not None:
+                entries.append((_sidebar_order(path), path, item))
+        return [(path, item) for _order, path, item in sorted(entries, key=lambda entry: entry[0])]
 
     def path_scope(path):
         return _required_scope(base_dir, path)
@@ -235,36 +267,21 @@ def create_app(
             return jsonify({"status": "not_ready"}), 503
         return jsonify({"status": "ready"})
 
-    @app.route("/")
-    @app.route("/browse/")
-    @app.route("/browse/<path:subpath>")
-    def browse(subpath=""):
-        if request.path == "/" and home_url is not None:
-            return redirect(_request_local_url(home_url))
-        current = safe_path(subpath)
+    def render_listing(current, subpath, *, listing):
         query = request.args.get("q", "").strip()
-        if not current.is_dir():
-            abort(404)
-        require_scope(path_scope(current))
-
-        manifest = report_manifest(current)
-        if manifest is not None and request.args.get("browse") != "1":
-            return render_report(subpath)
-        endpoint = endpoint_manifest(current)
-        if endpoint is not None and request.args.get("browse") != "1":
-            return redirect(_request_local_url(endpoint_mount_url(subpath, endpoint)))
-
+        hide = (read_sidebar(base_dir) or {"hide": []})["hide"]
         items = []
         for path in sorted(current.iterdir(), key=_sort_key):
+            rel = path.relative_to(base_dir).as_posix()
             if (
                 path.is_symlink()
                 or path.name.casefold() == "sidebar.json"
+                or is_hidden_path(rel, hide)
                 or not has_scope(path_scope(path))
             ):
                 continue
             if query and query.lower() not in path.name.lower():
                 continue
-            rel = path.relative_to(base_dir).as_posix()
             item_manifest = report_manifest(path)
             item_endpoint = endpoint_manifest(path)
             is_dir = path.is_dir()
@@ -283,22 +300,29 @@ def create_app(
                     "kind": _item_kind(item_manifest, item_endpoint, is_dir, path),
                     "size": _format_size(None if is_dir else path.stat().st_size),
                     "modified": _format_mtime(path),
-                    "href": _item_href(rel, item_manifest, item_endpoint, is_dir, path),
+                    "href": _item_href(rel, item_endpoint, is_dir),
                     "delete_href": url_for("delete_item", subpath=rel) if not is_dir else None,
-                    "browse_href": url_for("browse", subpath=rel, browse=1)
+                    "browse_href": _path_url(rel, directory=True, listing=1)
                     if item_manifest is not None
                     or item_endpoint is not None
                     or (is_dir and _directory_index(path) is not None)
                     else None,
-                    "download_href": url_for("download", filename=rel)
+                    "download_href": _path_url(rel, raw=1)
                     if path.is_file() and path.suffix.casefold() == ".md"
                     else None,
                 }
             )
 
+        readme = None
+        readme_path = current / "README.md"
+        if readme_path.is_file() and not readme_path.is_symlink():
+            readme = Markup(_render_markdown(readme_path.read_text(encoding="utf-8"), "README.md")[1])
+        listing_args = {"listing": 1} if listing else {}
         parent = None
         if current != base_dir:
-            parent = current.parent.relative_to(base_dir).as_posix()
+            parent = _path_url(
+                current.parent.relative_to(base_dir).as_posix(), directory=True, **listing_args
+            )
         content = render_template(
             "browser.html",
             items=items,
@@ -308,6 +332,9 @@ def create_app(
             base_dir=base_dir,
             item_count=len(items),
             query=query,
+            listing=listing,
+            clear_href=_path_url(subpath, directory=True, **listing_args),
+            readme=readme,
             can_manage_files=has_scope(DASHBOARD_CONTROL),
             file_control_token=app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"],
         )
@@ -323,39 +350,15 @@ def create_app(
             **sidebar_location(current),
         )
 
-    @app.route("/files/")
-    @app.route("/files/<path:filename>")
-    def download(filename=""):
-        target = safe_path(filename)
-        require_scope(path_scope(target))
-        if target.is_dir():
-            if filename and not filename.endswith("/"):
-                return redirect(url_for("download", filename=filename.rstrip("/") + "/"))
-            index = _directory_index(target)
-            if index is not None:
-                return app.response_class(
-                    index.read_bytes(), content_type="text/html; charset=utf-8"
-                )
-            return browse(filename)
-        if not target.exists():
-            abort(404)
-        if target.suffix.casefold() in {".html", ".htm"}:
-            return app.response_class(target.read_bytes(), content_type="text/html; charset=utf-8")
-        return send_from_directory(base_dir, filename, as_attachment=False)
-
-    @app.get("/document/<path:filename>")
-    def render_markdown(filename):
-        target = safe_path(filename)
-        if not target.is_file() or target.suffix.casefold() != ".md":
-            abort(404)
-        require_scope(path_scope(target))
-        title, body = _render_markdown(target.read_text(encoding="utf-8"), filename)
+    def render_markdown(target):
+        relative = target.relative_to(base_dir).as_posix()
+        title, body = _render_markdown(target.read_text(encoding="utf-8"), relative)
         content = render_template(
             "markdown.html",
             title=title,
             body=Markup(body),
-            breadcrumbs=_build_breadcrumbs(filename),
-            download_href=url_for("download", filename=filename),
+            breadcrumbs=_build_breadcrumbs(relative),
+            download_href=_path_url(relative, raw=1),
         )
         return render_workspace_page(
             title,
@@ -364,6 +367,52 @@ def create_app(
             main_class="markdown-document",
             **sidebar_location(target),
         )
+
+    def render_report(current):
+        html = current / "index.html"
+        if not html.exists() or html.is_symlink():
+            abort(404)
+        content = html.read_text()
+        if request.script_root:
+            content = content.replace('="/static/', f'="{request.script_root}/static/')
+            content = content.replace('="/api/', f'="{request.script_root}/api/')
+        return app.response_class(content, content_type="text/html; charset=utf-8")
+
+    @app.get("/", defaults={"subpath": ""})
+    @app.get("/<path:subpath>")
+    def serve_path(subpath):
+        """Serve one www path: documents render, folders show their page or listing."""
+        listing = request.args.get("listing") == "1"
+        if not subpath and home_url is not None and not listing:
+            return redirect(_request_local_url(home_url))
+        target = safe_path(subpath)
+        require_scope(path_scope(target))
+        if not target.exists():
+            abort(404)
+        relative = target.relative_to(base_dir).as_posix()
+        if target.is_file():
+            suffix = target.suffix.casefold()
+            if suffix == ".md" and request.args.get("raw") != "1":
+                return render_markdown(target)
+            if suffix in {".html", ".htm"}:
+                return app.response_class(
+                    target.read_bytes(), content_type="text/html; charset=utf-8"
+                )
+            return send_from_directory(base_dir, relative, as_attachment=False)
+        if subpath and not request.path.endswith("/"):
+            return redirect(_path_url(relative, directory=True, **request.args))
+        if not listing:
+            if report_manifest(target) is not None:
+                return render_report(target)
+            endpoint = endpoint_manifest(target)
+            if endpoint is not None:
+                return redirect(_request_local_url(endpoint_mount_url(relative, endpoint)))
+            index = _directory_index(target)
+            if index is not None:
+                return app.response_class(
+                    index.read_bytes(), content_type="text/html; charset=utf-8"
+                )
+        return render_listing(target, "" if target == base_dir else relative, listing=listing)
 
     @app.post("/upload/", defaults={"subpath": ""})
     @app.post("/upload/<path:subpath>")
@@ -405,7 +454,7 @@ def create_app(
                 target.unlink(missing_ok=True)
             raise
 
-        return redirect(url_for("browse", subpath=subpath, browse=1))
+        return redirect(_path_url(subpath, directory=True, listing=1))
 
     @app.post("/delete/<path:subpath>")
     def delete_item(subpath):
@@ -425,7 +474,7 @@ def create_app(
         parent = target.parent.relative_to(base_dir).as_posix()
         if parent == ".":
             parent = ""
-        return redirect(url_for("browse", subpath=parent, browse=1))
+        return redirect(_path_url(parent, directory=True, listing=1))
 
     @app.get("/api/v1/navigation")
     def navigation_tree():
@@ -448,6 +497,12 @@ def create_app(
             ),
             script_root=request.script_root,
         )
+        exposed = read_sidebar(base_dir) is not None
+        payload["items"].extend(
+            item
+            for path, item in sidebar_entries(base_dir, ROOT_COLLECTION_ID, base_dir)
+            if exposed or read_folder_sidebar(path) is not None
+        )
         restart_control = app.config["POLYPTICH_WWW_SERVICE_RESTART_CONTROL"]
         payload["actions"] = []
         if restart_control is not None and has_scope(SERVICE_RESTART):
@@ -463,8 +518,11 @@ def create_app(
     @app.get("/api/v1/navigation/collections/<node_id>", defaults={"subpath": ""})
     @app.get("/api/v1/navigation/collections/<node_id>/<path:subpath>")
     def navigation_directory_collection(node_id, subpath):
-        node = app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].get(node_id)
-        collection = node.get("collection") if node is not None else None
+        if node_id == ROOT_COLLECTION_ID:
+            collection = {"type": "directory", "path": ""}
+        else:
+            node = app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].get(node_id)
+            collection = node.get("collection") if node is not None else None
         if collection is None or collection.get("type") != "directory":
             abort(404)
         collection_root = safe_path(collection["path"])
@@ -482,23 +540,13 @@ def create_app(
         page = _bounded_positive_int_arg("page", 1, maximum=1_000_000)
         page_size = _bounded_positive_int_arg("page_size", 20, maximum=100)
 
-        visible = {}
-        for path in sorted(current.iterdir(), key=lambda item: item.name.casefold()):
-            if path.is_symlink() or _is_hidden_collection_name(path.name):
-                continue
-            if not has_scope(path_scope(path)):
-                continue
-            item = _directory_navigation_item(
-                path,
-                base_dir,
-                node_id,
-                collection_root=collection_root,
-                can_access=lambda child: has_scope(path_scope(child)),
-            )
-            if item is not None:
-                visible[path.name] = item
-
-        favorite_names = collection.get("favorites", []) if not subpath else []
+        visible = {
+            path.name: item for path, item in sidebar_entries(current, node_id, collection_root)
+        }
+        favorite_names = [
+            *(collection.get("favorites", []) if not subpath else []),
+            *((read_folder_sidebar(current) or {}).get("favorites", []) if current != base_dir else []),
+        ]
         favorites = []
         for name in favorite_names:
             item = visible.get(name)
@@ -525,29 +573,6 @@ def create_app(
                 "total": total,
             }
         )
-
-    @app.route("/report/<path:subpath>")
-    def render_report(subpath):
-        current = safe_path(subpath)
-        require_scope(path_scope(current))
-        if current.is_file():
-            report_root = _report_ancestor(base_dir, current.parent)
-            if report_root is None:
-                abort(404)
-            return send_from_directory(base_dir, current.relative_to(base_dir), as_attachment=False)
-        manifest = report_manifest(current)
-        if manifest is None:
-            abort(404)
-        if not request.path.endswith("/"):
-            return redirect(url_for("render_report", subpath=subpath.rstrip("/") + "/"))
-        html = current / "index.html"
-        if not html.exists() or html.is_symlink():
-            abort(404)
-        content = html.read_text()
-        if request.script_root:
-            content = content.replace('="/static/', f'="{request.script_root}/static/')
-            content = content.replace('="/api/', f'="{request.script_root}/api/')
-        return app.response_class(content, content_type="text/html; charset=utf-8")
 
     @app.route("/report-data/<path:subpath>/<component_id>")
     def report_data(subpath, component_id):
@@ -655,7 +680,9 @@ def create_app(
 
     @app.errorhandler(404)
     def not_found(_error):
-        return render_template("404.html", path=request.path, root_href=url_for("browse")), 404
+        return render_template(
+            "404.html", path=request.path, root_href=url_for("serve_path", subpath="")
+        ), 404
 
     factories = _discover_endpoint_factories(endpoint_factories)
     _register_endpoint_manifests(app, base_dir, manifests, factories, endpoint_mounts)
@@ -933,19 +960,18 @@ def _item_kind(manifest, endpoint, is_dir, path):
     return path.suffix.lower().lstrip(".") or "file"
 
 
-def _item_href(rel, manifest, endpoint, is_dir, path=None):
-    if manifest is not None:
-        return url_for("render_report", subpath=rel.rstrip("/") + "/")
+def _item_href(rel, endpoint, is_dir):
     if endpoint is not None:
         return _request_local_url(endpoint_mount_url(rel, endpoint))
-    if is_dir:
-        index = _directory_index(path) if path is not None else None
-        if index is not None:
-            return url_for("download", filename=rel.rstrip("/") + "/")
-        return url_for("browse", subpath=rel)
-    if path is not None and path.suffix.casefold() == ".md":
-        return url_for("render_markdown", filename=rel)
-    return url_for("download", filename=rel)
+    return _path_url(rel, directory=is_dir)
+
+
+def _path_url(relative, *, directory=False, **args):
+    """Return the URL of a www-relative path; folders end with a slash."""
+    relative = relative.strip("/")
+    if directory and relative:
+        relative += "/"
+    return url_for("serve_path", subpath=relative, **args)
 
 
 def _render_markdown(source, filename):
@@ -959,31 +985,7 @@ def _render_markdown(source, filename):
         if token.type == "heading_open" and token.tag == "h1" and index + 1 < len(tokens):
             title = tokens[index + 1].content.strip() or title
             break
-    for token in tokens:
-        for child in token.children or ():
-            attribute = (
-                "src"
-                if child.type == "image"
-                else "href"
-                if child.type == "link_open"
-                else None
-            )
-            if attribute is None:
-                continue
-            value = child.attrGet(attribute)
-            if value:
-                child.attrSet(attribute, _markdown_link(filename, value))
     return title, markdown.renderer.render(tokens, markdown.options, {})
-
-
-def _markdown_link(filename, value):
-    parsed = urlparse(value)
-    if parsed.scheme or parsed.netloc or parsed.path.startswith("/") or not parsed.path:
-        return value
-    relative = normpath(f"{Path(filename).parent.as_posix()}/{parsed.path}")
-    endpoint = "render_markdown" if Path(relative).suffix.casefold() == ".md" else "download"
-    resolved = url_for(endpoint, filename=relative)
-    return urlunparse(("", "", resolved, parsed.params, parsed.query, parsed.fragment))
 
 
 def _request_local_url(value):
@@ -1030,29 +1032,23 @@ def _directory_navigation_item(
                 value = {}
             if value.get("schema") == ENDPOINT_SCHEMA:
                 endpoint = _request_local_url(endpoint_mount_url(relative, value))
-        index = _directory_index(path)
-        if endpoint is not None:
-            href = endpoint
-        elif index is not None:
-            href = url_for("download", filename=relative.rstrip("/") + "/")
-        else:
-            href = url_for("browse", subpath=relative, browse=1)
+        href = endpoint if endpoint is not None else _path_url(relative, directory=True)
     else:
-        href = (
-            url_for("render_markdown", filename=relative)
-            if path.suffix.casefold() == ".md"
-            else url_for("download", filename=relative)
-        )
+        href = _path_url(relative)
+    folder = read_folder_sidebar(path) if is_directory else None
+    folder = folder or {}
     expandable = is_directory and _directory_has_navigation_children(
         path, can_access=can_access
     )
     item = {
         "id": _directory_item_id(collection_id, relative),
-        "label": path.name,
+        "label": folder.get("label", path.name),
         "type": "collection" if expandable else "page",
         "href": href,
-        "icon": "folder" if is_directory else "document",
+        "icon": folder.get("icon", "folder" if is_directory else "document"),
     }
+    if folder.get("favorite"):
+        item["favorite"] = True
     if expandable:
         child_subpath = path.relative_to(collection_root).as_posix()
         item["collection"] = {
@@ -1063,7 +1059,15 @@ def _directory_navigation_item(
                 subpath=child_subpath,
             ),
         }
+        if "placeholder" in folder:
+            item["collection"]["placeholder"] = folder["placeholder"]
     return item
+
+
+def _sidebar_order(path):
+    """Sort explicitly ordered folders first, then everything by name."""
+    order = (read_folder_sidebar(path) or {}).get("order") if path.is_dir() else None
+    return (order is None, order or 0, path.name.casefold())
 
 
 def _directory_item_id(collection_id, relative):
@@ -1098,20 +1102,6 @@ def _directory_has_navigation_children(path, *, can_access):
     return False
 
 
-def _report_ancestor(base_dir, path):
-    current = path
-    while current != base_dir and base_dir in current.parents:
-        manifest = current / "manifest.json"
-        if manifest.is_file() and not manifest.is_symlink():
-            try:
-                if _read_manifest(manifest).get("schema") == SCHEMA:
-                    return current
-            except ValueError:
-                return None
-        current = current.parent
-    return None
-
-
 def _format_size(size):
     if size is None:
         return "directory"
@@ -1132,13 +1122,13 @@ def _format_mtime(path):
 
 
 def _build_breadcrumbs(subpath):
-    breadcrumbs = [{"label": "www", "path": ""}]
+    breadcrumbs = [{"label": "www", "href": _path_url("", listing=1)}]
     current_parts = []
     for part in Path(subpath).parts:
         if part in {"", "."}:
             continue
         current_parts.append(part)
-        breadcrumbs.append({"label": part, "path": "/".join(current_parts)})
+        breadcrumbs.append({"label": part, "href": _path_url("/".join(current_parts), directory=True)})
     return breadcrumbs
 
 

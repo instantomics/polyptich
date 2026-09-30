@@ -140,7 +140,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert client.get("/readyz").get_json() == {"status": "ready"}
     for path in [
         "/",
-        "/files/public.txt",
+        "/public.txt",
         "/static/bootstrap-5.3.8.min.css",
         "/static/bootstrap-5.3.8.bundle.min.js",
         "/static/bootstrap-icons-1.13.1.min.css",
@@ -151,7 +151,7 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
 
     regular = auth("reader@example.test")
     assert client.get("/health", headers=regular).status_code == 404
-    assert client.post("/restart", headers=regular).status_code == 404
+    assert client.post("/restart", headers=regular).status_code == 405
     assert client.post("/delete/public.txt", headers=regular).status_code == 403
     root_page = client.get("/", headers=regular)
     assert root_page.status_code == 200
@@ -164,28 +164,28 @@ def test_access_and_inherited_scopes_cover_browser_report_files_and_assets(tmp_p
     assert client.get("/static/fonts/bootstrap-icons.woff2", headers=regular).status_code == 200
     assert client.get("/report-data/unsafe-report/plot", headers=regular).status_code == 403
     for path in [
-        "/browse/private",
-        "/report/private/report",
-        "/files/private/report/plot.json",
+        "/private/",
+        "/private/report/",
+        "/private/report/plot.json",
         "/report-data/private/report/plot",
         "/report-download/private/report/table.xlsx",
     ]:
         assert client.get(path, headers=regular).status_code == 403
 
     viewer = auth("viewer@example.test")
-    rendered = client.get("/report/private/report/", headers=viewer)
+    rendered = client.get("/private/report/", headers=viewer)
     assert rendered.status_code == 200
     assert rendered.data.count(b"data-polyptich-navigation-shell") == 1
     assert b"<base " not in rendered.data
     prefixed = client.get(
-        "/report/private/report/",
+        "/private/report/",
         headers=viewer,
         environ_overrides={"SCRIPT_NAME": "/gateway"},
     )
     assert b'href="/gateway/static/' in prefixed.data
     assert b'src="/gateway/static/' in prefixed.data
     assert b'data-navigation-url="/gateway/api/' in prefixed.data
-    assert client.get("/report/private/report/plot.json", headers=viewer).data == b'{"data": []}'
+    assert client.get("/private/report/plot.json", headers=viewer).data == b'{"data": []}'
     assert client.get("/report-data/private/report/plot", headers=viewer).data == b'{"data": []}'
     download = client.get("/report-download/private/report/table.xlsx", headers=viewer)
     assert download.status_code == 200
@@ -567,7 +567,7 @@ def test_custom_endpoint_mount_drives_routes_navigation_scope_and_proxy_prefix(t
     )
     assert legacy.status_code == 308
     assert legacy.headers["Location"] == "/gateway/dashboard/api/items?view=current"
-    redirect = client.get("/browse/internal-dashboard", headers=auth("viewer@example.test"))
+    redirect = client.get("/internal-dashboard/", headers=auth("viewer@example.test"))
     assert redirect.headers["Location"] == "/dashboard/"
     navigation = client.get(
         "/api/v1/navigation",
@@ -646,7 +646,7 @@ def test_configured_product_home_redirects_only_root_with_proxy_prefix(tmp_path)
     assert root.status_code == 302
     assert root.headers["Location"] == "/endpoint/dashboard/"
     assert prefixed.headers["Location"] == "/gateway/endpoint/dashboard/"
-    assert client.get("/browse/", headers=auth("reader@example.test")).status_code == 200
+    assert client.get("/?listing=1", headers=auth("reader@example.test")).status_code == 200
     assert client.get(
         "/", headers=auth("reader@example.test"), follow_redirects=True
     ).status_code == 404

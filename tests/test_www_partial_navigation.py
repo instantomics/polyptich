@@ -33,7 +33,7 @@ def test_managed_static_pages_advertise_partial_navigation_protocol(tmp_path: Pa
     )
     app = create_app(tmp_path, access_verifier=FakeVerifier())
 
-    response = app.test_client().get("/files/managed/", headers=auth())
+    response = app.test_client().get("/managed/", headers=auth())
 
     assert response.status_code == 200
     assert b'data-polyptich-page-version="1"' in response.data
@@ -53,7 +53,7 @@ def test_raw_html_stays_outside_partial_navigation_protocol(tmp_path: Path):
     )
     app = create_app(tmp_path, access_verifier=FakeVerifier())
 
-    response = app.test_client().get("/files/raw/", headers=auth())
+    response = app.test_client().get("/raw/", headers=auth())
 
     assert response.status_code == 200
     assert b"data-polyptich-navigation-host" not in response.data

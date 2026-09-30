@@ -81,24 +81,24 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     app = create_app(tmp_path, access_verifier=FakeVerifier())
     client = app.test_client()
 
-    redirect = client.get("/files/docs", headers=auth())
+    redirect = client.get("/docs", headers=auth())
     assert redirect.status_code == 302
-    assert redirect.headers["Location"].endswith("/files/docs/")
-    page = client.get("/files/docs/", headers=auth())
+    assert redirect.headers["Location"].endswith("/docs/")
+    page = client.get("/docs/", headers=auth())
     assert page.status_code == 200
     assert page.data == raw
     assert b"data-polyptich-navigation-shell" not in page.data
-    browser = client.get("/browse/docs?browse=1", headers=auth())
+    browser = client.get("/docs/?listing=1", headers=auth())
     assert browser.status_code == 200
     assert b"polyptich www: /docs" in browser.data
     assert browser.data.count(b"data-polyptich-navigation-shell") == 1
     assert b"onclick=" not in browser.data
     assert "O'Brien.html" in browser.get_data(as_text=True).replace("&#39;", "'")
-    files_root = client.get("/files/", headers=auth())
+    files_root = client.get("/", headers=auth())
     assert files_root.status_code == 200
     assert files_root.data.count(b"data-polyptich-navigation-shell") == 1
     prefixed = client.get(
-        "/browse/docs?browse=1",
+        "/docs/?listing=1",
         headers=auth(),
         environ_overrides={"SCRIPT_NAME": "/gateway"},
     )
@@ -115,6 +115,7 @@ def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tm
     images.mkdir(parents=True)
     (images / "plot.png").write_bytes(b"plot")
     (docs / "related.md").write_text("# Related\n")
+    (docs / "README.md").write_text("# About these documents\n")
     (docs / "grant.md").write_text(
         "# Current grant\n\n"
         "| Field | Value |\n| --- | --- |\n| GPUs | 4 |\n\n"
@@ -124,19 +125,23 @@ def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tm
     app = create_app(tmp_path, access_verifier=FakeVerifier())
     client = app.test_client()
 
-    listing = client.get("/browse/docs", headers=auth()).get_data(as_text=True)
-    assert 'href="/document/docs/grant.md"' in listing
+    listing = client.get("/docs/", headers=auth()).get_data(as_text=True)
+    assert 'href="/docs/grant.md"' in listing
     assert "markdown document" in listing
-    assert 'href="/files/docs/grant.md"' in listing
+    assert 'href="/docs/grant.md?raw=1"' in listing
+    assert "<h1>About these documents</h1>" in listing
+    raw = client.get("/docs/grant.md?raw=1", headers=auth())
+    assert raw.get_data(as_text=True).startswith("# Current grant")
 
-    response = client.get("/document/docs/grant.md", headers=auth())
+    response = client.get("/docs/grant.md", headers=auth())
     document = response.get_data(as_text=True)
     assert response.status_code == 200
     assert '<main id="pt-global-navigation-main" class="markdown-document"' in document
     assert "<h1>Current grant</h1>" in document
     assert "<table>" in document
-    assert 'href="/document/docs/related.md#details"' in document
-    assert 'src="/files/docs/images/plot.png"' in document
+    assert 'href="related.md#details"' in document
+    assert 'src="images/plot.png"' in document
+    assert client.get("/docs/images/plot.png", headers=auth()).data == b"plot"
     assert "<script>alert('unsafe')</script>" not in document
     assert "&lt;script&gt;alert('unsafe')&lt;/script&gt;" in document
 
@@ -215,7 +220,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
                 "schema": "polyptich.www.navigation",
                 "schema_version": 1,
                 "title": "Iomix",
-                "brand": {"label": "InstantOmics", "asset": "/files/assets/instantomics.svg"},
+                "brand": {"label": "InstantOmics", "asset": "/assets/instantomics.svg"},
                 "items": [
                     {
                         "id": "tasks",
@@ -223,7 +228,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
                         "type": "collection",
                         "icon": "tasks",
                         "active": True,
-                        "href": "/files/tasks/",
+                        "href": "/tasks/",
                         "collection": {
                             "type": "directory",
                             "path": "tasks",
@@ -241,7 +246,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
                                 "id": "private-task",
                                 "label": "Private task",
                                 "type": "page",
-                                "href": "/files/tasks/private/",
+                                "href": "/tasks/private/",
                             }
                         ],
                     },
@@ -260,7 +265,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     assert skeleton["schema"] == "polyptich.www.navigation"
     assert skeleton["brand"] == {
         "label": "InstantOmics",
-        "asset": "/files/assets/instantomics.svg",
+        "asset": "/assets/instantomics.svg",
     }
     assert [item["id"] for item in skeleton["items"]] == ["tasks"]
     assert skeleton["items"][0]["icon"] == "tasks"
@@ -272,7 +277,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
         headers=auth(),
         environ_overrides={"SCRIPT_NAME": "/gateway"},
     ).get_json()
-    assert prefixed_tree["brand"]["asset"] == "/gateway/files/assets/instantomics.svg"
+    assert prefixed_tree["brand"]["asset"] == "/gateway/assets/instantomics.svg"
 
     first = client.get(collection_href + "?q=a&page=1&page_size=1", headers=auth()).get_json()
     second = client.get(collection_href + "?q=a&page=2&page_size=1", headers=auth()).get_json()
@@ -293,7 +298,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     alpha = next(item for item in all_items["items"] if item["label"] == "alpha")
     assert alpha["type"] == "collection"
     assert alpha["icon"] == "folder"
-    assert alpha["href"].endswith("/files/tasks/alpha/")
+    assert alpha["href"].endswith("/tasks/alpha/")
     nested = client.get(alpha["collection"]["href"], headers=auth()).get_json()
     assert "placeholder" not in alpha["collection"]
     evidence_item = nested["items"][0]
@@ -302,7 +307,7 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     leaf = client.get(evidence_item["collection"]["href"], headers=auth()).get_json()
     assert leaf["items"] == [
         {
-            "href": "/files/tasks/alpha/evidence/metrics.html",
+            "href": "/tasks/alpha/evidence/metrics.html",
             "icon": "document",
             "id": leaf["items"][0]["id"],
             "label": "metrics.html",
@@ -317,52 +322,57 @@ def test_directory_collection_favorites_search_paging_and_scope_filtering(tmp_pa
     )
 
 
-def test_folder_sidebar_manifests_discover_ordered_directory_collections(tmp_path):
+def test_sidebar_shows_opted_in_folders_until_the_root_exposes_everything(tmp_path):
     www = tmp_path / "www"
-    analysis = www / "analysis"
-    documents = www / "grant documents"
-    analysis.mkdir(parents=True)
-    documents.mkdir()
-    (analysis / "report.md").write_text("# Report\n")
-    (documents / "application.md").write_text("# Application\n")
-    (analysis / "sidebar.json").write_text(
-        json.dumps(
-            {
-                "schema": "polyptich.www.sidebar.folder",
-                "schema_version": 1,
-                "label": "Analysis",
-                "icon": "chart",
-                "order": 20,
-                "placeholder": "Find an analysis",
-                "favorites": ["report.md"],
-            }
-        )
-    )
-    (documents / "sidebar.json").write_text(
-        json.dumps(
-            {
-                "schema": "polyptich.www.sidebar.folder",
-                "schema_version": 1,
-                "label": "Grant documents",
-                "icon": "document",
-                "order": 10,
-            }
-        )
-    )
-    app = create_app(tmp_path, access_verifier=FakeVerifier())
-    client = app.test_client()
+    for folder in ["analysis", "grant documents", "code/old", "docs"]:
+        (www / folder).mkdir(parents=True)
+    (www / "analysis" / "report.md").write_text("# Report\n")
+    (www / "analysis" / "draft.md").write_text("# Draft\n")
+    (www / "grant documents" / "application.md").write_text("# Application\n")
+    (www / "code" / "run.md").write_text("# Run\n")
+    (www / "code" / "old" / "legacy.md").write_text("# Legacy\n")
+    (www / "docs" / "guide.md").write_text("# Guide\n")
+    (www / "README.md").write_text("# Home\n")
 
-    items = client.get("/api/v1/navigation", headers=auth()).get_json()["items"]
+    def folder_sidebar(path, **declaration):
+        (www / path / "sidebar.json").write_text(
+            json.dumps({"schema": "polyptich.www.sidebar.folder", "schema_version": 1, **declaration})
+        )
+
+    folder_sidebar("analysis", label="Analysis", icon="chart", order=20, favorites=["report.md"])
+    folder_sidebar("grant documents", label="Grant documents", icon="document", order=10)
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+
+    def sidebar():
+        return client.get("/api/v1/navigation", headers=auth()).get_json()["items"]
+
+    items = sidebar()
     assert [item["label"] for item in items] == ["Grant documents", "Analysis"]
-    assert items[0]["href"] == "/browse/grant%20documents"
-    assert items[0]["icon"] == "document"
-    assert items[1]["collection"]["placeholder"] == "Find an analysis"
+    assert items[0]["href"] == "/grant%20documents/"
+    assert items[1]["icon"] == "chart"
     collection = client.get(items[1]["collection"]["href"], headers=auth()).get_json()
     assert [item["label"] for item in collection["favorites"]] == ["report.md"]
-    assert collection["items"] == []
-    assert "sidebar.json" not in client.get("/browse/analysis", headers=auth()).get_data(
-        as_text=True
+    assert [item["label"] for item in collection["items"]] == ["draft.md"]
+
+    # Exposing everything and hiding paths takes effect without restarting the server.
+    (www / "sidebar.json").write_text(
+        json.dumps(
+            {"schema": "polyptich.www.sidebar", "schema_version": 1, "hide": ["code/old", "*/draft.md"]}
+        )
     )
+    folder_sidebar("docs", label="Documentation", favorites=["guide.md"])
+    items = sidebar()
+    assert [item["label"] for item in items] == [
+        "Grant documents", "Analysis", "code", "Documentation", "README.md",
+    ]
+    code = next(item for item in items if item["label"] == "code")
+    assert code["href"] == "/code/"
+    code_items = client.get(code["collection"]["href"], headers=auth()).get_json()["items"]
+    assert [item["label"] for item in code_items] == ["run.md"]
+    analysis = client.get(items[1]["collection"]["href"], headers=auth()).get_json()
+    assert analysis["items"] == []
+    assert "old/" not in client.get("/code/", headers=auth()).get_data(as_text=True)
+    assert "sidebar.json" not in client.get("/analysis/", headers=auth()).get_data(as_text=True)
 
 
 def test_pages_inside_sidebar_folders_name_the_folders_leading_to_them(tmp_path):

@@ -11,7 +11,7 @@ page = www.Page(
     pp.paths.get_www() / "my_report",
     title="My Analysis",
     author="Analysis team",
-    breadcrumbs=[("Examples", "/browse"), ("My Analysis", None)],
+    breadcrumbs=[("Examples", "/"), ("My Analysis", None)],
     provenance={"Dataset": "Example data", "Git commit": "development"},
     source_url="analysis.ipynb",
 )

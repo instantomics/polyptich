@@ -1,7 +1,7 @@
 <header class="markdown-header">
   <ol class="breadcrumbs">
     {% for crumb in breadcrumbs %}
-      <li>{% if not loop.first %}/{% endif %}{% if loop.last %}<span aria-current="page">{{ crumb.label }}</span>{% else %}<a href="{{ url_for('browse', subpath=crumb.path) }}">{{ crumb.label }}</a>{% endif %}</li>
+      <li>{% if not loop.first %}/{% endif %}{% if loop.last %}<span aria-current="page">{{ crumb.label }}</span>{% else %}<a href="{{ crumb.href }}">{{ crumb.label }}</a>{% endif %}</li>
     {% endfor %}
   </ol>
   <a class="markdown-source-link" href="{{ download_href }}">Download Markdown</a>

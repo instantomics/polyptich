@@ -73,11 +73,10 @@
     const scriptPath = reportScriptUrl ? new URL(reportScriptUrl, window.location.href).pathname : "";
     const suffix = "/static/polyptich-www.js";
     const prefix = scriptPath.endsWith(suffix) ? scriptPath.slice(0, -suffix.length) : "";
-    const marker = prefix + "/report/";
-    if (!window.location.pathname.startsWith(marker)) return { prefix, path: "" };
+    if (!window.location.pathname.startsWith(prefix + "/")) return { prefix, path: "" };
     return {
       prefix,
-      path: decodeURIComponent(window.location.pathname.slice(marker.length)).replace(/\/$/, ""),
+      path: decodeURIComponent(window.location.pathname.slice(prefix.length)).replace(/^\/+|\/+$/g, ""),
     };
   }
 
@@ -282,8 +281,8 @@
         item.setAttribute("aria-current", "page");
       } else {
         const link = element("a", "", label);
-        link.href = location.prefix + "/browse/" + parts.slice(0, index + 1)
-          .map(encodeURIComponent).join("/");
+        link.href = location.prefix + "/" + parts.slice(0, index + 1)
+          .map(encodeURIComponent).join("/") + "/";
         item.append(link);
       }
       list.append(item);

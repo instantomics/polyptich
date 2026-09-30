@@ -10,7 +10,7 @@
 
     <ol class="breadcrumbs">
       {% for crumb in breadcrumbs %}
-        <li>{% if not loop.first %}/{% endif %}<a href="{{ url_for('browse', subpath=crumb.path) }}">{{ crumb.label }}</a></li>
+        <li>{% if not loop.first %}/{% endif %}<a href="{{ crumb.href }}">{{ crumb.label }}</a></li>
       {% endfor %}
     </ol>
 
@@ -25,12 +25,13 @@
 
     <form class="controls" method="get">
       <input type="search" name="q" value="{{ query }}" placeholder="Filter files, folders, and reports" aria-label="Filter files, folders, and reports">
+      {% if listing %}<input type="hidden" name="listing" value="1">{% endif %}
       <button type="submit">Filter</button>
-      {% if query %}<a class="button-link" href="{{ url_for('browse', subpath=subpath) if subpath else url_for('browse') }}">Clear</a>{% endif %}
+      {% if query %}<a class="button-link" href="{{ clear_href }}">Clear</a>{% endif %}
     </form>
 
     {% if parent is not none %}
-      <div class="parent-link"><a href="{{ url_for('browse', subpath=parent) }}">Parent directory</a></div>
+      <div class="parent-link"><a href="{{ parent }}">Parent directory</a></div>
     {% endif %}
 
     {% if items %}
@@ -64,4 +65,10 @@
       </table>
     {% else %}
       <div class="empty">{% if query %}No items match <code>{{ query }}</code>.{% else %}This directory is empty.{% endif %}</div>
+    {% endif %}
+
+    {% if readme %}
+      <article class="markdown-body directory-readme">
+{{ readme }}
+      </article>
     {% endif %}
