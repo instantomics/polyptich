@@ -55,6 +55,7 @@ from .navigation import (
     serialize_service_restart_action,
 )
 from .page import SCHEMA
+from .sources import SourceTree, physical_path, source_backed
 from .tables import (
     DEFAULT_CLIENT_MAX_BYTES,
     DEFAULT_CLIENT_MAX_ROWS,
@@ -104,6 +105,12 @@ def create_app(
     home_url = _validate_home_url(home_url)
     manifests = _read_initial_manifests(base_dir)
     endpoint_mounts = endpoint_mount_urls(base_dir, manifests)
+    source_tree = SourceTree(
+        workspace_root, base_dir,
+        reports=[path.parent for path, manifest in manifests.items() if manifest.get("schema") == SCHEMA],
+    )
+    if source_tree.mounts:
+        base_dir = source_tree.path(base_dir)
     navigation = load_navigation(base_dir, manifests, endpoint_mounts=endpoint_mounts)
 
     app = Flask(__name__, static_folder=None)
@@ -121,7 +128,7 @@ def create_app(
 
     app.config.update(
         POLYPTICH_WWW_WORKSPACE_ROOT=workspace_root,
-        POLYPTICH_WWW_ROOT_PATH=base_dir,
+        POLYPTICH_WWW_ROOT_PATH=source_tree.root,
         POLYPTICH_WWW_EXTERNAL_ORIGIN=external_origin,
         POLYPTICH_WWW_HOME_URL=home_url,
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
@@ -135,6 +142,8 @@ def create_app(
     table_cache = DataFrameCache()
 
     def safe_path(subpath=""):
+        if subpath.strip("/") == "sources.json":
+            abort(404)
         requested = base_dir / subpath
         target = requested.resolve()
         if target != base_dir and base_dir not in target.parents:
@@ -275,7 +284,7 @@ def create_app(
             rel = path.relative_to(base_dir).as_posix()
             if (
                 path.is_symlink()
-                or path.name.casefold() == "sidebar.json"
+                or path.name.casefold() in {"sidebar.json", "sources.json"}
                 or is_hidden_path(rel, hide)
                 or not has_scope(path_scope(path))
             ):
@@ -301,7 +310,8 @@ def create_app(
                     "size": _format_size(None if is_dir else path.stat().st_size),
                     "modified": _format_mtime(path),
                     "href": _item_href(rel, item_endpoint, is_dir),
-                    "delete_href": url_for("delete_item", subpath=rel) if not is_dir else None,
+                    "delete_href": url_for("delete_item", subpath=rel)
+                    if not is_dir and not source_backed(path) else None,
                     "browse_href": _path_url(rel, directory=True, listing=1)
                     if item_manifest is not None
                     or item_endpoint is not None
@@ -335,7 +345,7 @@ def create_app(
             listing=listing,
             clear_href=_path_url(subpath, directory=True, **listing_args),
             readme=readme,
-            can_manage_files=has_scope(DASHBOARD_CONTROL),
+            can_manage_files=has_scope(DASHBOARD_CONTROL) and not source_backed(current),
             file_control_token=app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"],
         )
         return render_workspace_page(
@@ -352,21 +362,36 @@ def create_app(
 
     def render_markdown(target):
         relative = target.relative_to(base_dir).as_posix()
-        title, body = _render_markdown(target.read_text(encoding="utf-8"), relative)
+        source = target.read_text(encoding="utf-8")
+        title, body = _render_markdown(source, relative)
         content = render_template(
             "markdown.html",
             title=title,
             body=Markup(body),
             breadcrumbs=_build_breadcrumbs(relative),
             download_href=_path_url(relative, raw=1),
+            revision=hashlib.sha256(source.encode()).hexdigest(),
+            revision_url=url_for("document_revision", subpath=relative),
         )
         return render_workspace_page(
             title,
             content,
             stylesheets=[url_for("static_files", filename="polyptich-www.css")],
             main_class="markdown-document",
+            body_end_html=(
+                f'<script src="{url_for("static_files", filename="polyptich-live.js")}"></script>'
+            ),
             **sidebar_location(target),
         )
+
+    @app.get("/api/v1/document-revision/<path:subpath>")
+    def document_revision(subpath):
+        target = safe_path(subpath)
+        require_scope(path_scope(target))
+        if not target.is_file() or target.suffix.casefold() != ".md":
+            abort(404)
+        source = target.read_text(encoding="utf-8")
+        return jsonify({"revision": hashlib.sha256(source.encode()).hexdigest()})
 
     def render_report(current):
         html = current / "index.html"
@@ -398,7 +423,7 @@ def create_app(
                 return app.response_class(
                     target.read_bytes(), content_type="text/html; charset=utf-8"
                 )
-            return send_from_directory(base_dir, relative, as_attachment=False)
+            return send_file(physical_path(target), as_attachment=False)
         if subpath and not request.path.endswith("/"):
             return redirect(_path_url(relative, directory=True, **request.args))
         if not listing:
@@ -418,6 +443,8 @@ def create_app(
     @app.post("/upload/<path:subpath>")
     def upload_files(subpath):
         current = safe_path(subpath)
+        if source_backed(current):
+            abort(403, description="Source-backed folders are read-only")
         if not current.is_dir():
             abort(404)
         require_scope(path_scope(current))
@@ -435,6 +462,8 @@ def create_app(
                 abort(400, description=f"Duplicate upload filename: {name}")
             names.add(name)
             target = current / name
+            if source_backed(target) or target.name == "sources.json":
+                abort(403, description="Source declarations and source-backed files are read-only")
             if target.exists() or target.is_symlink():
                 abort(409, description=f"A file named {name} already exists")
             pending.append((upload, target))
@@ -459,6 +488,8 @@ def create_app(
     @app.post("/delete/<path:subpath>")
     def delete_item(subpath):
         target = safe_path(subpath)
+        if source_backed(target) or target.name == "sources.json":
+            abort(403, description="Source-backed files are read-only")
         if target == base_dir:
             abort(400, description="The WWW root cannot be deleted")
         require_scope(path_scope(target))
@@ -584,7 +615,7 @@ def create_app(
         component = manifest.get("assets", {}).get(component_id)
         if component is None:
             abort(404)
-        asset = report_asset(current, component)
+        asset = physical_path(report_asset(current, component))
         if component.get("type") == "table":
             pd = _require_pandas()
             if "protocol" not in request.args:
@@ -614,11 +645,7 @@ def create_app(
             except TableQueryError as error:
                 return _table_query_error(error)
         if component.get("type") == "plotly":
-            return send_from_directory(
-                base_dir,
-                str(asset.relative_to(base_dir)),
-                as_attachment=False,
-            )
+            return send_file(physical_path(asset), as_attachment=False)
         abort(404)
 
     @app.route(
@@ -639,7 +666,7 @@ def create_app(
         if component is None or component.get("type") != "table":
             abort(404)
         pd = _require_pandas()
-        asset = report_asset(current, component)
+        asset = physical_path(report_asset(current, component))
         frame = ensure_string_columns(table_cache.get(asset, lambda path: pd.read_parquet(path)))
         column_types = dataframe_column_types(frame)
         try:
@@ -685,7 +712,7 @@ def create_app(
         ), 404
 
     factories = _discover_endpoint_factories(endpoint_factories)
-    _register_endpoint_manifests(app, base_dir, manifests, factories, endpoint_mounts)
+    _register_endpoint_manifests(app, source_tree.root, manifests, factories, endpoint_mounts)
     return app
 
 

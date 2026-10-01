@@ -54,7 +54,7 @@ _NODE_KEYS = {
 }
 _COLLECTION_KEYS = {"type", "path", "href", "placeholder", "favorites"}
 _BRAND_KEYS = {"label", "asset"}
-_HIDDEN_NAMES = {"assets", ".assets", "manifest.json", "navigation.json", "sidebar.json"}
+_HIDDEN_NAMES = {"assets", ".assets", "manifest.json", "navigation.json", "sidebar.json", "sources.json"}
 _MOUNT_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]*$")
 _RESERVED_MOUNT_ROOTS = frozenset(
     {
