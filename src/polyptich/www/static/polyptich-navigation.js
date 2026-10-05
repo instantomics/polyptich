@@ -122,6 +122,7 @@
     ["examples", "bi-images"],
     ["releases", "bi-list-ul"],
     ["release", "bi-tag"],
+    ["people", "bi-people"],
   ]);
   const mobileMedia = window.matchMedia("(max-width: 64rem)");
   const focusableSelector = [

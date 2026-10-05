@@ -38,6 +38,7 @@ NAVIGATION_ICONS = frozenset(
         "examples",
         "releases",
         "release",
+        "people",
     }
 )
 _NODE_KEYS = {
