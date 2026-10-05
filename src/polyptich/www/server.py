@@ -133,6 +133,9 @@ def create_app(
         POLYPTICH_WWW_HOME_URL=home_url,
         POLYPTICH_WWW_RESTART_CALLBACK=restart_callback,
         POLYPTICH_WWW_ENDPOINT_SCOPES={},
+        # Optional callable returning (trusted_viewer_emails, operator_emails) that
+        # extend the startup lists, so an endpoint can manage roles while running.
+        POLYPTICH_WWW_ACCESS_ROLES=None,
         POLYPTICH_WWW_FILE_CONTROL_TOKEN=secrets.token_urlsafe(32),
         POLYPTICH_WWW_NAVIGATION=navigation,
         POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
@@ -253,10 +256,20 @@ def create_app(
         except (AccessVerificationError, ValueError) as error:
             return jsonify({"error": "access_denied", "message": str(error)}), 401
         g.polyptich_access_identity = identity
+        trusted, operators = tuple(trusted_viewer_emails), tuple(operator_emails)
+        provider = app.config["POLYPTICH_WWW_ACCESS_ROLES"]
+        if provider is not None:
+            try:
+                extra_trusted, extra_operators = provider()
+            except Exception:  # Keep the startup roles if a provider fails.
+                app.logger.exception("Access role provider failed; using startup roles only")
+            else:
+                trusted += tuple(extra_trusted)
+                operators += tuple(extra_operators)
         g.polyptich_access_scopes = scopes_for_email(
             identity.email,
-            trusted_viewer_emails=trusted_viewer_emails,
-            operator_emails=operator_emails,
+            trusted_viewer_emails=trusted,
+            operator_emails=operators,
         )
         required = _endpoint_scope_for_request(
             app.config["POLYPTICH_WWW_ENDPOINT_SCOPES"],

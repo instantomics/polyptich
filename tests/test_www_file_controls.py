@@ -117,3 +117,33 @@ def test_file_controls_reject_invalid_tokens_and_upload_names(tmp_path):
     )
     assert invalid_name.status_code == 400
     assert not (tmp_path / "www" / "outside.txt").exists()
+
+
+def test_access_role_provider_extends_startup_roles_and_failures_fall_back(tmp_path):
+    (tmp_path / "www" / "documents").mkdir(parents=True)
+    app = create_app(
+        tmp_path, access_verifier=FakeVerifier(), operator_emails=["owner@example.test"]
+    )
+    roles = {"operators": ("added@example.test",)}
+
+    def provider():
+        if roles["operators"] is None:
+            raise RuntimeError("registry unavailable")
+        return (), roles["operators"]
+
+    app.config["POLYPTICH_WWW_ACCESS_ROLES"] = provider
+    client = app.test_client()
+    token = app.config["POLYPTICH_WWW_FILE_CONTROL_TOKEN"]
+
+    def upload(email):
+        return client.post(
+            "/upload/documents",
+            headers=auth(email),
+            data={"csrf_token": token, "files": (BytesIO(b"x"), f"{email}.txt")},
+        ).status_code
+
+    assert upload("added@example.test") == 302
+    assert upload("reader@example.test") == 403
+    roles["operators"] = None
+    assert upload("added@example.test") == 403
+    assert upload("owner@example.test") == 302
