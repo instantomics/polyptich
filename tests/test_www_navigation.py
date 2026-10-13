@@ -455,6 +455,47 @@ def test_navigation_rejects_non_allowlisted_icons(tmp_path, icon):
         create_app(tmp_path, access_verifier=FakeVerifier())
 
 
+def test_navigation_reloads_edited_declaration_and_keeps_last_valid_one(tmp_path, monkeypatch):
+    monkeypatch.setattr("polyptich.www.server.NAVIGATION_RELOAD_SECONDS", 0)
+    www = tmp_path / "www"
+    www.mkdir()
+    declaration = www / "navigation.json"
+
+    def declare(icon):
+        declaration.write_text(
+            json.dumps(
+                {
+                    "schema": "polyptich.www.navigation",
+                    "schema_version": 1,
+                    "title": "Iomix",
+                    "items": [
+                        {
+                            "id": "tasks",
+                            "label": "Tasks",
+                            "type": "page",
+                            "href": "/tasks/",
+                            "icon": icon,
+                        }
+                    ],
+                }
+            )
+        )
+
+    def served_icon():
+        items = client.get("/api/v1/navigation", headers=auth()).get_json()["items"]
+        return next(item["icon"] for item in items if item["id"] == "tasks")
+
+    declare("tasks")
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+    assert served_icon() == "tasks"
+
+    declare("folder")
+    assert served_icon() == "folder"
+
+    declare("not-an-icon")
+    assert served_icon() == "folder"
+
+
 def test_navigation_rejects_remote_brand_asset(tmp_path):
     www = tmp_path / "www"
     www.mkdir()

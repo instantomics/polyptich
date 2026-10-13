@@ -7,6 +7,8 @@ import secrets
 import shutil
 import stat
 import sys
+import threading
+import time
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -76,6 +78,7 @@ ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
 ENDPOINT_ENTRY_POINT_GROUP = "polyptich.www.endpoints"
 ROOT_COLLECTION_ID = "www"
+NAVIGATION_RELOAD_SECONDS = 1.0
 
 
 def create_app(
@@ -143,6 +146,36 @@ def create_app(
         POLYPTICH_WWW_TABLE_CLIENT_MAX_BYTES=DEFAULT_CLIENT_MAX_BYTES,
     )
     table_cache = DataFrameCache()
+    navigation_paths = (base_dir / "navigation.json", *manifests)
+    navigation_reload = {
+        "lock": threading.Lock(),
+        "checked": time.monotonic(),
+        "signature": _file_signature(navigation_paths),
+    }
+
+    def current_navigation():
+        """Return the navigation, reloaded after its declaration or a manifest changes.
+
+        Endpoint routes and mounts stay fixed at startup; an invalid edit keeps the
+        last valid navigation.
+        """
+        with navigation_reload["lock"]:
+            now = time.monotonic()
+            if now - navigation_reload["checked"] >= NAVIGATION_RELOAD_SECONDS:
+                navigation_reload["checked"] = now
+                signature = _file_signature(navigation_paths)
+                if signature != navigation_reload["signature"]:
+                    navigation_reload["signature"] = signature
+                    try:
+                        current = {
+                            path: _read_manifest(path) for path in manifests if path.exists()
+                        }
+                        app.config["POLYPTICH_WWW_NAVIGATION"] = load_navigation(
+                            base_dir, current, endpoint_mounts=endpoint_mounts
+                        )
+                    except ValueError as error:
+                        app.logger.error("Keeping the previous navigation: %s", error)
+            return app.config["POLYPTICH_WWW_NAVIGATION"]
 
     def safe_path(subpath=""):
         if subpath.strip("/") == "sources.json":
@@ -183,7 +216,7 @@ def create_app(
 
     def sidebar_location(target):
         """Return the sidebar id of target and the ids of the folders leading to it."""
-        for node_id, node in app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].items():
+        for node_id, node in current_navigation()["nodes"].items():
             collection = node.get("collection")
             if collection is None or collection.get("type") != "directory":
                 continue
@@ -534,7 +567,7 @@ def create_app(
             return all(path is None or has_scope(path_scope(path)) for path in paths)
 
         payload = serialize_navigation(
-            app.config["POLYPTICH_WWW_NAVIGATION"],
+            current_navigation(),
             can_access=can_access,
             collection_href=lambda node_id: url_for(
                 "navigation_directory_collection", node_id=node_id
@@ -565,7 +598,7 @@ def create_app(
         if node_id == ROOT_COLLECTION_ID:
             collection = {"type": "directory", "path": ""}
         else:
-            node = app.config["POLYPTICH_WWW_NAVIGATION"]["nodes"].get(node_id)
+            node = current_navigation()["nodes"].get(node_id)
             collection = node.get("collection") if node is not None else None
         if collection is None or collection.get("type") != "directory":
             abort(404)
@@ -744,6 +777,18 @@ def _local_url(value, name):
     if not isinstance(value, str) or not value.startswith("/") or value.startswith("//"):
         raise ValueError(f"Polyptich service restart {name} must be a local absolute URL")
     return value
+
+
+def _file_signature(paths):
+    signature = []
+    for path in paths:
+        try:
+            status = path.stat()
+        except FileNotFoundError:
+            signature.append(None)
+        else:
+            signature.append((status.st_mtime_ns, status.st_size))
+    return tuple(signature)
 
 
 def _read_initial_manifests(base_dir):
