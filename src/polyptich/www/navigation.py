@@ -39,6 +39,16 @@ NAVIGATION_ICONS = frozenset(
         "releases",
         "release",
         "people",
+        "trophy",
+        "curriculum",
+        "experiment",
+        "deployment",
+        "operations",
+        "storage",
+        "key",
+        "credits",
+        "llm",
+        "budget",
     }
 )
 _NODE_KEYS = {

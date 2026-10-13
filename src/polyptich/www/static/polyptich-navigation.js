@@ -123,6 +123,16 @@
     ["releases", "bi-list-ul"],
     ["release", "bi-tag"],
     ["people", "bi-people"],
+    ["trophy", "bi-trophy"],
+    ["curriculum", "bi-mortarboard"],
+    ["experiment", "bi-flask"],
+    ["deployment", "bi-rocket-takeoff"],
+    ["operations", "bi-tools"],
+    ["storage", "bi-hdd-stack"],
+    ["key", "bi-key"],
+    ["credits", "bi-wallet2"],
+    ["llm", "bi-chat-square-dots"],
+    ["budget", "bi-cash-coin"],
   ]);
   const mobileMedia = window.matchMedia("(max-width: 64rem)");
   const focusableSelector = [
