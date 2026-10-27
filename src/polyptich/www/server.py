@@ -77,6 +77,9 @@ from .tables import (
 ENDPOINT_SCHEMA = "polyptich.www.endpoint"
 ENDPOINT_SCHEMA_VERSION = 1
 ENDPOINT_ENTRY_POINT_GROUP = "polyptich.www.endpoints"
+# A folder whose content moved: every path below it redirects to the same path
+# below the manifest's www-relative "path".
+MOVED_SCHEMA = "polyptich.www.moved"
 ROOT_COLLECTION_ID = "www"
 NAVIGATION_RELOAD_SECONDS = 1.0
 
@@ -216,6 +219,19 @@ def create_app(
         if manifest is None or manifest.get("schema") != ENDPOINT_SCHEMA:
             return None
         return manifest
+
+    def moved_path(target):
+        """Where a moved manifest on target's nearest existing folder sends it."""
+        folder = target
+        while not folder.exists() and folder != base_dir:
+            folder = folder.parent
+        manifest = read_manifest(folder)
+        if manifest is None or manifest.get("schema") != MOVED_SCHEMA:
+            return None
+        destination = manifest.get("path")
+        if not isinstance(destination, str) or not destination.strip("/"):
+            raise ValueError(f"{folder / 'manifest.json'} must name the www path it moved to")
+        return safe_path(destination.strip("/")) / target.relative_to(folder)
 
     def sidebar_location(target):
         """Return the sidebar id of target and the ids of the folders leading to it."""
@@ -474,6 +490,15 @@ def create_app(
         if not subpath and home_url is not None and not listing:
             return redirect(_request_local_url(home_url))
         target = safe_path(subpath)
+        moved = moved_path(target)
+        if moved is not None:
+            destination = _path_url(
+                moved.relative_to(base_dir).as_posix(),
+                directory=request.path.endswith("/"),
+                **request.args,
+            )
+            # Temporary: a moved folder may later take its name back.
+            return redirect(destination, code=307)
         require_scope(path_scope(target))
         if not target.exists():
             abort(404)

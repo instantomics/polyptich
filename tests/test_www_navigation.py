@@ -109,6 +109,27 @@ def test_workspace_document_browser_and_raw_directory_index_contracts(tmp_path):
     assert b'data-navigation-url="/gateway/api/v1/navigation"' in prefixed.data
 
 
+def test_moved_folder_redirects_every_path_below_it(tmp_path):
+    current = tmp_path / "www" / "tasks" / "current" / "releases" / "1.0"
+    current.mkdir(parents=True)
+    (current / "index.html").write_text("<html></html>")
+    write_manifest(
+        tmp_path / "www" / "tasks" / "former",
+        {"schema": "polyptich.www.moved", "schema_version": 1, "path": "tasks/current"},
+    )
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+
+    page = client.get(
+        "/tasks/former/releases/1.0/?section=a",
+        headers=auth(),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+    assert page.status_code == 307
+    assert page.headers["Location"] == "/gateway/tasks/current/releases/1.0/?section=a"
+    root = client.get("/tasks/former/", headers=auth())
+    assert root.headers["Location"] == "/tasks/current/"
+
+
 def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tmp_path):
     docs = tmp_path / "www" / "docs"
     images = docs / "images"
