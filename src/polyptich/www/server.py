@@ -139,6 +139,9 @@ def create_app(
         # Optional callable returning (trusted_viewer_emails, operator_emails) that
         # extend the startup lists, so an endpoint can manage roles while running.
         POLYPTICH_WWW_ACCESS_ROLES=None,
+        # Optional callable returning {scope: emails}; each listed email also holds
+        # that application-defined scope, for access that does not follow a role.
+        POLYPTICH_WWW_SCOPE_GRANTS=None,
         POLYPTICH_WWW_FILE_CONTROL_TOKEN=secrets.token_urlsafe(32),
         POLYPTICH_WWW_NAVIGATION=navigation,
         POLYPTICH_WWW_SERVICE_RESTART_CONTROL=None,
@@ -299,11 +302,25 @@ def create_app(
             else:
                 trusted += tuple(extra_trusted)
                 operators += tuple(extra_operators)
-        g.polyptich_access_scopes = scopes_for_email(
+        scopes = scopes_for_email(
             identity.email,
             trusted_viewer_emails=trusted,
             operator_emails=operators,
         )
+        grants = app.config["POLYPTICH_WWW_SCOPE_GRANTS"]
+        if grants is not None:
+            try:
+                granted = grants()
+            except Exception:  # A failing provider grants no additional scopes.
+                app.logger.exception("Scope grant provider failed; granting no extra scopes")
+            else:
+                email = identity.email.casefold()
+                scopes |= {
+                    scope
+                    for scope, emails in granted.items()
+                    if email in {value.casefold() for value in emails}
+                }
+        g.polyptich_access_scopes = scopes
         required = _endpoint_scope_for_request(
             app.config["POLYPTICH_WWW_ENDPOINT_SCOPES"],
             request.path,

@@ -1,7 +1,7 @@
 from io import BytesIO
 
 from polyptich.www import AccessIdentity, create_app
-from polyptich.www.auth import AccessVerificationError
+from polyptich.www.auth import AccessVerificationError, current_scopes
 
 
 class FakeVerifier:
@@ -147,3 +147,26 @@ def test_access_role_provider_extends_startup_roles_and_failures_fall_back(tmp_p
     roles["operators"] = None
     assert upload("added@example.test") == 403
     assert upload("owner@example.test") == 302
+
+
+def test_scope_grants_add_application_scopes_and_failures_grant_none(tmp_path):
+    (tmp_path / "www").mkdir()
+    app = create_app(tmp_path, access_verifier=FakeVerifier())
+    grants = {"curriculum.read": ("Maintainer@Example.test",)}
+
+    def provider():
+        if grants is None:
+            raise RuntimeError("registry unavailable")
+        return grants
+
+    app.config["POLYPTICH_WWW_SCOPE_GRANTS"] = provider
+    app.add_url_rule("/scopes", "scopes", lambda: ",".join(sorted(current_scopes())))
+    client = app.test_client()
+
+    def holds(email):
+        return "curriculum.read" in client.get("/scopes", headers=auth(email)).text.split(",")
+
+    assert holds("maintainer@example.test")
+    assert not holds("reader@example.test")
+    grants = None
+    assert not holds("maintainer@example.test")
