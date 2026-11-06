@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -41,7 +42,7 @@ from .auth import (
     require_scope,
     scopes_for_email,
 )
-from .document import render_workspace_page
+from .document import _json_script_value, render_workspace_page
 from .navigation import (
     COLLECTION_SCHEMA,
     COLLECTION_SCHEMA_VERSION,
@@ -82,6 +83,10 @@ ENDPOINT_ENTRY_POINT_GROUP = "polyptich.www.endpoints"
 MOVED_SCHEMA = "polyptich.www.moved"
 ROOT_COLLECTION_ID = "www"
 _REMOVED_PAGE_PREFIXES = frozenset({"browse", "document", "files", "report"})
+_PAGE_CONTEXT = re.compile(
+    r'(<script id="pt-global-navigation-context" type="application/json">)(.*?)(</script>)',
+    re.DOTALL,
+)
 NAVIGATION_RELOAD_SECONDS = 1.0
 
 
@@ -477,11 +482,28 @@ def create_app(
         html = current / "index.html"
         if not html.exists() or html.is_symlink():
             abort(404)
-        content = html.read_text()
+        content = with_sidebar_location(html.read_bytes(), current).decode()
         if request.script_root:
             content = content.replace('="/static/', f'="{request.script_root}/static/')
             content = content.replace('="/api/', f'="{request.script_root}/api/')
         return app.response_class(content, content_type="text/html; charset=utf-8")
+
+    def with_sidebar_location(html, target):
+        """Open the sidebar at target when a pre-rendered page does not name its own place."""
+        if b"pt-global-navigation-context" not in html:
+            return html
+
+        def fill(match):
+            try:
+                context = json.loads(match[2])
+            except json.JSONDecodeError:
+                return match[0]
+            if not isinstance(context, dict) or context.get("navigation_id") is not None:
+                return match[0]
+            context.update(sidebar_location(target))
+            return match[1] + _json_script_value(context) + match[3]
+
+        return _PAGE_CONTEXT.sub(fill, html.decode(), count=1).encode()
 
     @app.get("/", defaults={"subpath": ""})
     @app.get("/<path:subpath>")
@@ -518,7 +540,8 @@ def create_app(
                 return render_markdown(target)
             if suffix in {".html", ".htm"}:
                 return app.response_class(
-                    target.read_bytes(), content_type="text/html; charset=utf-8"
+                    with_sidebar_location(target.read_bytes(), target),
+                    content_type="text/html; charset=utf-8",
                 )
             return send_file(physical_path(target), as_attachment=False)
         if subpath and not request.path.endswith("/"):
@@ -532,7 +555,8 @@ def create_app(
             index = _directory_index(target)
             if index is not None:
                 return app.response_class(
-                    index.read_bytes(), content_type="text/html; charset=utf-8"
+                    with_sidebar_location(index.read_bytes(), target),
+                    content_type="text/html; charset=utf-8",
                 )
         return render_listing(target, "" if target == base_dir else relative, listing=listing)
 

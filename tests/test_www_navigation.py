@@ -151,6 +151,31 @@ def test_removed_page_prefixes_redirect_to_plain_paths(tmp_path):
     assert client.get("/report/", headers=auth()).status_code == 200
 
 
+def test_prerendered_pages_open_the_sidebar_at_their_folder(tmp_path):
+    report = tmp_path / "www" / "singlecell" / "run" / "de"
+    report.mkdir(parents=True)
+    (report / "index.html").write_text(
+        render_workspace_document("DE", "<p>DE</p>")
+    )
+    (report / "named.html").write_text(
+        render_workspace_document("Named", "<p>Named</p>", navigation_id="docs")
+    )
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+
+    def context(path):
+        page = client.get(path, headers=auth()).get_data(as_text=True)
+        start = page.index('id="pt-global-navigation-context" type="application/json">')
+        return json.loads(page[page.index(">", start) + 1 : page.index("</script>", start)])
+
+    nested = client.get(
+        "/api/v1/navigation/collections/www/singlecell/run", headers=auth()
+    ).json["items"]
+    page = context("/singlecell/run/de/")
+    assert page["navigation_id"] == nested[0]["id"]
+    assert len(page["navigation_trail"]) == 2
+    assert context("/singlecell/run/de/named.html")["navigation_id"] == "docs"
+
+
 def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tmp_path):
     docs = tmp_path / "www" / "docs"
     images = docs / "images"
