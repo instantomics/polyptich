@@ -1205,7 +1205,7 @@ def _directory_navigation_item(
         "label": folder.get("label", path.name),
         "type": "collection" if expandable else "page",
         "href": href,
-        "icon": folder.get("icon", "folder" if is_directory else "document"),
+        "icon": folder.get("icon", "folder" if expandable else "document"),
     }
     if folder.get("favorite"):
         item["favorite"] = True

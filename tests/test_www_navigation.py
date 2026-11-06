@@ -157,6 +157,8 @@ def test_prerendered_pages_open_the_sidebar_at_their_folder(tmp_path):
     (report / "index.html").write_text(
         render_workspace_document("DE", "<p>DE</p>")
     )
+    (report / "volcano").mkdir()
+    (report / "volcano" / "index.html").write_text("<html></html>")
     (report / "named.html").write_text(
         render_workspace_document("Named", "<p>Named</p>", navigation_id="docs")
     )
@@ -172,6 +174,9 @@ def test_prerendered_pages_open_the_sidebar_at_their_folder(tmp_path):
     ).json["items"]
     page = context("/singlecell/run/de/")
     assert page["navigation_id"] == nested[0]["id"]
+    assert nested[0]["icon"] == "folder"
+    report_item = client.get(nested[0]["collection"]["href"], headers=auth()).json["items"][0]
+    assert report_item["icon"] == "document"
     assert len(page["navigation_trail"]) == 2
     assert context("/singlecell/run/de/named.html")["navigation_id"] == "docs"
 

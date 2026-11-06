@@ -485,6 +485,26 @@
     return element;
   };
 
+  const collectionCachePrefix = "polyptichNavigationCollection:";
+  const readCachedPayload = (key, validate) => {
+    try {
+      const text = window.sessionStorage.getItem(key);
+      const payload = text === null ? null : JSON.parse(text);
+      return payload !== null && validate(payload) ? {payload, text} : null;
+    } catch (_error) {
+      return null;
+    }
+  };
+  const writeCachedPayload = (key, payload) => {
+    const text = JSON.stringify(payload);
+    try {
+      window.sessionStorage.setItem(key, text);
+    } catch (_error) {
+      // Without storage every page load simply fetches the sidebar again.
+    }
+    return text;
+  };
+
   const renderCollection = (host, config) => {
     if (host._ptEnsureCollectionLoaded) {
       host._ptEnsureCollectionLoaded();
@@ -605,6 +625,29 @@
       renderPayload(currentPayload);
     };
 
+    let shownText = null;
+    const applyPayload = (payload, text) => {
+      currentPayload = payload;
+      shownText = text;
+      const ordinaryItems = renderPayload(payload);
+      page = payload.page;
+      total = payload.total;
+      const pages = Number.isInteger(total) ? Math.max(1, Math.ceil(total / payload.page_size)) : null;
+      toolbar.hidden = page <= 1 && !payload.has_more;
+      previous.disabled = page <= 1;
+      next.disabled = !payload.has_more;
+      refresh.disabled = false;
+      pageStatus.textContent = `${page} / ${pages ?? "?"}`;
+      pageStatus.setAttribute("aria-label", pages === null ? `Page ${page}` : `Page ${page} of ${pages}`);
+      const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
+      if (!ordinaryItems.length && query) setStatus("No matching pages");
+      else if (!ordinaryItems.length && !payload.favorites.length) setStatus("Empty folder");
+      else if (!toolbar.hidden) {
+        setStatus(`${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`);
+      } else setStatus("");
+      ready = true;
+    };
+
     const requestPage = async (requestedPage) => {
       if (controller) controller.abort();
       const activeController = new AbortController();
@@ -614,10 +657,18 @@
       if (config.placeholder) url.searchParams.set("q", query);
       url.searchParams.set("page", String(requestedPage));
       url.searchParams.set("page_size", String(pageSize));
-      setStatus("Loading…");
-      previous.disabled = true;
-      next.disabled = true;
-      refresh.disabled = true;
+      // Show the last known listing at once and only redraw when the server's differs.
+      const cacheKey = `${collectionCachePrefix}${url.pathname}${url.search}`;
+      const cached = readCachedPayload(cacheKey, validateCollectionPayload);
+      if (cached) {
+        if (cached.text !== shownText) applyPayload(cached.payload, cached.text);
+        ready = true;
+      } else {
+        setStatus("Loading…");
+        previous.disabled = true;
+        next.disabled = true;
+        refresh.disabled = true;
+      }
       try {
         const response = await fetch(url, {headers: {Accept: "application/json"}, signal: activeController.signal});
         if (!response.ok) throw new Error(`Navigation request failed (${response.status})`);
@@ -626,25 +677,10 @@
           throw new Error("Navigation collection returned an invalid response");
         }
         if (controller !== activeController) return;
-        currentPayload = payload;
-        const ordinaryItems = renderPayload(payload);
-        page = payload.page;
-        total = payload.total;
-        const pages = Number.isInteger(total) ? Math.max(1, Math.ceil(total / payload.page_size)) : null;
-        toolbar.hidden = page <= 1 && !payload.has_more;
-        previous.disabled = page <= 1;
-        next.disabled = !payload.has_more;
-        refresh.disabled = false;
-        pageStatus.textContent = `${page} / ${pages ?? "?"}`;
-        pageStatus.setAttribute("aria-label", pages === null ? `Page ${page}` : `Page ${page} of ${pages}`);
-        const reportedTotal = Number.isInteger(total) ? total : payload.total_lower_bound;
-        if (!ordinaryItems.length && query) setStatus("No matching pages");
-        else if (!ordinaryItems.length && !payload.favorites.length) setStatus("Empty folder");
-        else if (!toolbar.hidden) {
-          setStatus(`${reportedTotal}${Number.isInteger(total) ? "" : "+"} item${reportedTotal === 1 ? "" : "s"}`);
-        } else setStatus("");
-        ready = true;
+        const text = writeCachedPayload(cacheKey, payload);
+        if (text !== shownText) applyPayload(payload, text);
       } catch (error) {
+        if (cached && controller === activeController) return;
         if (controller === activeController && error.name !== "AbortError") {
           setStatus("Navigation is temporarily unavailable");
           toolbar.hidden = false;
@@ -1401,28 +1437,36 @@
     title.replaceChildren(image);
   };
 
+  const validateNavigationPayload = (payload) => payload?.schema === "polyptich.www.navigation"
+    && payload.schema_version === 1
+    && Array.isArray(payload.items)
+    && payload.items.every((item) => validateNavigationNode(item))
+    && validateBrand(payload.brand);
+  const renderNavigationPayload = (payload) => {
+    renderBrand(payload);
+    navigationItems = payload.items;
+    preferredNavigationAvailable = Boolean(
+      pageContext.navigation_id && containsNavigationId(navigationItems, pageContext.navigation_id)
+    );
+    listRoot.replaceChildren(renderNodes(navigationItems));
+    applyActiveNavigation();
+    renderActions(Array.isArray(payload.actions) ? payload.actions : []);
+  };
+  const navigationCacheKey = `polyptichNavigationTree:${shell.dataset.navigationUrl}`;
+  const cachedNavigation = readCachedPayload(navigationCacheKey, validateNavigationPayload);
+  if (cachedNavigation) renderNavigationPayload(cachedNavigation.payload);
   fetch(shell.dataset.navigationUrl, {headers: {Accept: "application/json"}})
     .then((response) => {
       if (!response.ok) throw new Error(`Navigation request failed (${response.status})`);
       return response.json();
     })
     .then((payload) => {
-      if (payload?.schema !== "polyptich.www.navigation" || payload.schema_version !== 1
-        || !Array.isArray(payload.items)
-        || !payload.items.every((item) => validateNavigationNode(item))
-        || !validateBrand(payload.brand)) {
-        throw new Error("Navigation returned an invalid response");
-      }
-      renderBrand(payload);
-      navigationItems = payload.items;
-      preferredNavigationAvailable = Boolean(
-        pageContext.navigation_id && containsNavigationId(navigationItems, pageContext.navigation_id)
-      );
-      listRoot.replaceChildren(renderNodes(navigationItems));
-      applyActiveNavigation();
-      renderActions(Array.isArray(payload.actions) ? payload.actions : []);
+      if (!validateNavigationPayload(payload)) throw new Error("Navigation returned an invalid response");
+      const text = writeCachedPayload(navigationCacheKey, payload);
+      if (text !== cachedNavigation?.text) renderNavigationPayload(payload);
     })
     .catch(() => {
+      if (cachedNavigation) return;
       listRoot.replaceChildren();
       const status = document.createElement("p");
       status.className = "pt-global-navigation__status";
