@@ -81,6 +81,7 @@ ENDPOINT_ENTRY_POINT_GROUP = "polyptich.www.endpoints"
 # below the manifest's www-relative "path".
 MOVED_SCHEMA = "polyptich.www.moved"
 ROOT_COLLECTION_ID = "www"
+_REMOVED_PAGE_PREFIXES = frozenset({"browse", "document", "files", "report"})
 NAVIGATION_RELOAD_SECONDS = 1.0
 
 
@@ -489,6 +490,14 @@ def create_app(
         listing = request.args.get("listing") == "1"
         if not subpath and home_url is not None and not listing:
             return redirect(_request_local_url(home_url))
+        prefix, _, rest = subpath.partition("/")
+        if prefix in _REMOVED_PAGE_PREFIXES and not (base_dir / prefix).exists():
+            # Published reports still link to the page prefixes www paths once had.
+            args = request.args.to_dict()
+            if args.pop("browse", None) == "1":
+                args["listing"] = "1"
+            destination = _path_url(rest, directory=request.path.endswith("/"), **args)
+            return redirect(destination, code=301)
         target = safe_path(subpath)
         moved = moved_path(target)
         if moved is not None:

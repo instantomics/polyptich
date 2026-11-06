@@ -130,6 +130,27 @@ def test_moved_folder_redirects_every_path_below_it(tmp_path):
     assert root.headers["Location"] == "/tasks/current/"
 
 
+def test_removed_page_prefixes_redirect_to_plain_paths(tmp_path):
+    report = tmp_path / "www" / "singlecell" / "run"
+    report.mkdir(parents=True)
+    (report / "index.html").write_text("<html></html>")
+    client = create_app(tmp_path, access_verifier=FakeVerifier()).test_client()
+
+    page = client.get(
+        "/report/singlecell/run/?section=a",
+        headers=auth(),
+        environ_overrides={"SCRIPT_NAME": "/gateway"},
+    )
+    assert page.status_code == 301
+    assert page.headers["Location"] == "/gateway/singlecell/run/?section=a"
+    listing = client.get("/browse/singlecell/?browse=1", headers=auth())
+    assert listing.headers["Location"] == "/singlecell/?listing=1"
+
+    (tmp_path / "www" / "report").mkdir()
+    (tmp_path / "www" / "report" / "index.html").write_text("<html></html>")
+    assert client.get("/report/", headers=auth()).status_code == 200
+
+
 def test_browser_renders_markdown_documents_with_local_links_and_escaped_html(tmp_path):
     docs = tmp_path / "www" / "docs"
     images = docs / "images"
