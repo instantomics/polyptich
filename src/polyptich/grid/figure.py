@@ -88,14 +88,21 @@ class _Figure(mpl.figure.Figure):
         super().savefig(*args, dpi=dpi, bbox_inches=bbox_inches, **kwargs)
         self.close()
 
-        import IPython
+        if not display:
+            return
+        try:
+            from IPython import get_ipython
+            from IPython.display import SVG, Image, display as show
+        except ImportError:
+            return
+        if get_ipython() is None:
+            return
 
-        if IPython.get_ipython() is not None and display and str(args[0]).endswith(".svg"):
-            from IPython.display import SVG
-
-            IPython.display.display(SVG(args[0]))
-        elif IPython.get_ipython() is not None and display and not str(args[0]).endswith(".pdf"):
-            IPython.display.display(IPython.display.Image(args[0], retina=True))
+        path = str(args[0])
+        if path.endswith(".svg"):
+            show(SVG(path))
+        elif not path.endswith(".pdf"):
+            show(Image(path, retina=True))
 
     def display(self, **kwargs):
         import tempfile
